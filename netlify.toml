@@ -1,9 +1,13 @@
 [build]
   publish = "netlify-static"
   command = ""
-
+  
+[build.environment]
+  NETLIFY_NEXT_PLUGIN_SKIP = "true"
+  
 [[headers]]
   for = "/*"
+  
   [headers.values]
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
