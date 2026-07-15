@@ -234,7 +234,7 @@ export default function Home() {
   return (
     <main>
       <header className="topbar">
-        <a className="brand" href="#"><span className="brand-mark">✓</span><span>日迹 · 工作复盘</span></a>
+        <a className="brand" href="#"><span className="brand-mark">✓</span><span>日迹</span></a>
         <div className="top-actions">
           <span className={`save-state ${saved ? "" : "saving"}`}><i />{saved ? "已自动保存" : "正在保存"}</span>
           <button className="ghost-btn" onClick={copyReport}>复制日报</button>
