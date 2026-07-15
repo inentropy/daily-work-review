@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="记录今天、复盘昨天、预设明天，并自动生成周、月、季度和年度工作总结。">
+  <title>日迹｜工作复盘与周期总结</title>
+  <link rel="icon" href="favicon.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<main>
+  <header class="topbar">
+    <a class="brand" href="#"><span class="brand-mark">✓</span><span>日迹</span></a>
+    <div class="top-actions"><span class="save-state"><i></i><span id="saveText">已自动保存</span></span><button class="ghost-btn" id="copyBtn">复制日报</button><button class="avatar">工</button></div>
+  </header>
+  <section class="hero">
+    <div><p class="eyebrow">DAILY WORK REVIEW</p><h1>把每一天，<em>过得明白。</em></h1><p class="subtitle">记录今天的行动，复盘昨天的得失，为明天留一盏灯。</p></div>
+    <div class="date-control"><button id="prevDay" aria-label="前一天">←</button><label><span id="displayDate"></span><small id="dateText"></small><input id="dateInput" type="date"></label><button id="nextDay" aria-label="后一天">→</button><button class="today-btn" id="todayBtn">回到今天</button></div>
+  </section>
+  <section class="stats">
+    <div><span>今日完成</span><strong id="doneCount">0</strong><small>件重要事项</small></div>
+    <div><span>专注状态</span><strong><span id="focusStat">7</span><b>/10</b></strong><small id="focusLabel">稳步推进</small></div>
+    <div><span>明日预设</span><strong id="planCount">0</strong><small>项优先任务</small></div>
+    <div class="quote"><span>今日一句</span><p id="dailyQuote"></p><div class="quote-actions"><button id="addQuoteBtn" aria-label="添加语录" title="添加语录">＋</button><button id="quoteBtn" aria-label="换一句" title="换一句">↻</button></div></div>
+  </section>
+  <section class="workspace">
+    <article class="panel yesterday">
+      <div class="panel-head"><div class="number">01</div><div><p>LOOK BACK</p><h2>复盘昨天</h2></div><span class="tag">昨日回望</span></div>
+      <div class="yesterday-card" id="yesterdayCard"></div>
+      <label class="field-label">昨天最值得复用的经验</label><textarea id="learnings" placeholder="哪些做法有效？哪些经验值得带到今天……"></textarea>
+      <label class="field-label">遇到的问题与改进</label><textarea id="blockers" placeholder="哪里卡住了？下一次可以如何做得更好……"></textarea>
+    </article>
+    <article class="panel today">
+      <div class="panel-head"><div class="number">02</div><div><p>CAPTURE TODAY</p><h2>总结今天</h2></div><span class="tag active">正在记录</span></div>
+      <label class="field-label">今日完成</label><div class="task-list" id="winsList"></div><button class="add-btn" data-add="wins">＋ 添加一项完成</button>
+      <label class="field-label">进展与产出</label><textarea class="large" id="progress" placeholder="记录关键进展、数据、成果，或值得分享的细节……"></textarea>
+      <div class="sliders">
+        <label><span>今日心情</span><div class="moods" id="moods"><button>😣</button><button>😕</button><button>😐</button><button>🙂</button><button>😊</button></div></label>
+        <label><span>专注程度 <b id="focusValue">7/10</b></span><input id="focus" type="range" min="1" max="10" value="7"></label>
+      </div>
+    </article>
+    <article class="panel tomorrow">
+      <div class="panel-head"><div class="number">03</div><div><p>PLAN AHEAD</p><h2>预设明天</h2></div><span class="tag">提前一步</span></div>
+      <div class="tomorrow-date"><span>明日</span><strong id="tomorrowDate"></strong></div>
+      <label class="field-label">最重要的三件事</label><div class="plan-list" id="plansList"></div><button class="add-btn dark" data-add="tomorrow">＋ 添加一项计划</button>
+      <div class="focus-note"><span>✦</span><div><strong>给明天的提醒</strong><p>优先完成第一件事，再打开消息列表。给重要的事留出不被打扰的时间。</p></div></div>
+    </article>
+  </section>
+  <section class="period-section" id="periodSummary">
+    <div class="period-heading">
+      <div><p class="eyebrow">LONG VIEW</p><h2>周期总结</h2><p>把零散的每日记录，整理成看得见的成长轨迹。</p></div>
+      <div class="period-tabs" role="tablist" aria-label="总结周期">
+        <button class="active" data-summary-type="week" role="tab" aria-selected="true"><small>WEEKLY</small>周总结</button>
+        <button data-summary-type="month" role="tab" aria-selected="false"><small>MONTHLY</small>月总结</button>
+        <button data-summary-type="quarter" role="tab" aria-selected="false"><small>QUARTERLY</small>季度总结</button>
+        <button data-summary-type="year" role="tab" aria-selected="false"><small>YEARLY</small>年度总结</button>
+      </div>
+    </div>
+    <div class="period-toolbar">
+      <button id="prevPeriod" aria-label="上一周期">←</button>
+      <div><strong id="periodLabel"></strong><small id="periodRange"></small></div>
+      <button id="nextPeriod" aria-label="下一周期">→</button>
+      <button class="current-period" id="currentPeriod">回到本期</button>
+    </div>
+    <div class="period-metrics">
+      <div><span>记录天数</span><strong id="metricDays">0</strong><small>留下工作记录的天数</small></div>
+      <div><span>完成事项</span><strong id="metricWins">0</strong><small>本期已完成的工作</small></div>
+      <div><span>平均专注度</span><strong><span id="metricFocus">—</span><b id="metricFocusUnit"></b></strong><small>有记录日期的平均值</small></div>
+      <div><span>计划事项</span><strong id="metricPlans">0</strong><small>为下一步预设的任务</small></div>
+    </div>
+    <div class="period-digest">
+      <article>
+        <div class="digest-head"><div><p>ACHIEVEMENTS</p><h3>完成工作汇总</h3></div><span id="periodWinCount">0 项</span></div>
+        <div id="periodWins"></div>
+      </article>
+      <article>
+        <div class="digest-head"><div><p>PROGRESS</p><h3>进展摘录</h3></div><span id="periodProgressCount">0 条</span></div>
+        <div id="periodProgress"></div>
+      </article>
+    </div>
+    <div class="reflection-head"><div><p>PERSONAL REVIEW</p><h3>写下这一阶段真正值得留下的东西</h3></div><span>以下内容按周期自动保存</span></div>
+    <div class="reflection-grid">
+      <label><span><b>01</b>关键成果</span><small>最有价值的结果、数据或突破</small><textarea data-summary-field="achievements" placeholder="这一阶段最值得肯定的成果是……"></textarea></label>
+      <label><span><b>02</b>经验与成长</span><small>有效方法、能力提升和新认知</small><textarea data-summary-field="growth" placeholder="哪些方法值得继续复用……"></textarea></label>
+      <label><span><b>03</b>问题与改进</span><small>阻碍、偏差和下次的调整方式</small><textarea data-summary-field="challenges" placeholder="哪里可以做得更好……"></textarea></label>
+      <label><span><b>04</b>下一阶段重点</span><small>最重要的目标和行动方向</small><textarea data-summary-field="nextFocus" placeholder="下一阶段优先推进……"></textarea></label>
+    </div>
+    <div class="period-actions"><span><i></i> 已自动保存到当前浏览器</span><button id="copySummaryBtn">复制本期总结</button></div>
+  </section>
+  <footer><span>日迹 · 让工作留下清晰的脉络</span><span>数据仅保存在你的浏览器中</span></footer>
+  <div class="toast" id="toast" hidden>✓ 日报已复制</div>
+  <div class="modal-backdrop" id="quoteModal" hidden>
+    <div class="quote-editor" role="dialog" aria-modal="true" aria-labelledby="quoteEditorTitle">
+      <div class="editor-head"><div><p>MY QUOTE</p><h3 id="quoteEditorTitle">添加自己的语录</h3></div><button id="closeQuoteBtn" aria-label="关闭">×</button></div>
+      <textarea id="newQuoteInput" maxlength="120" placeholder="写下一句想提醒自己的话……"></textarea>
+      <div class="editor-foot"><small><span id="quoteLength">0</span>/120 · Ctrl + Enter 保存</small><div><button class="cancel" id="cancelQuoteBtn">取消</button><button class="save-quote" id="saveQuoteBtn" disabled>保存语录</button></div></div>
+    </div>
+  </div>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
