@@ -1,13 +1,14 @@
 [build]
-  publish = "netlify-static"
-  command = ""
-  
+  command = "npm run build"
+  publish = "out"
+
 [build.environment]
+  NODE_VERSION = "22.13.0"
   NETLIFY_NEXT_PLUGIN_SKIP = "true"
-  
+
 [[headers]]
   for = "/*"
-  
+
   [headers.values]
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"

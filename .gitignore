@@ -45,3 +45,6 @@ next-env.d.ts
 /site-package.tar.gz
 
 .tmp/
+# PyCharm
+.idea/
+*.iml
