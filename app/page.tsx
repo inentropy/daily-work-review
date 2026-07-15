@@ -295,11 +295,7 @@ export default function Home() {
           <label className="field-label">进展与产出</label>
           <textarea className="large" value={entry.progress} onChange={e => update({ progress: e.target.value })} placeholder="记录关键进展、数据、成果，或值得分享的细节……" />
           <div className="sliders">
-<<<<<<< Updated upstream
-            <label><span>今日阿迪斯心情</span><div className="moods">{["😣","😕","😐","🙂","😊"].map((m, i) => <button key={m} className={entry.mood === i + 1 ? "selected" : ""} onClick={() => update({ mood: i + 1 })}>{m}</button>)}</div></label>
-=======
-            <label><span>今日说心情</span><div className="moods">{["😣","😕","😐","🙂","😊"].map((m, i) => <button key={m} className={entry.mood === i + 1 ? "selected" : ""} onClick={() => update({ mood: i + 1 })}>{m}</button>)}</div></label>
->>>>>>> Stashed changes
+            <label><span>今日心情</span><div className="moods">{["😣","😕","😐","🙂","😊"].map((m, i) => <button key={m} className={entry.mood === i + 1 ? "selected" : ""} onClick={() => update({ mood: i + 1 })}>{m}</button>)}</div></label>
             <label><span>专注程度 <b>{entry.focus}/10</b></span><input type="range" min="1" max="10" value={entry.focus} onChange={e => update({ focus: Number(e.target.value) })}/></label>
           </div>
         </article>
