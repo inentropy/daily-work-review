@@ -43,3 +43,4 @@ npm test
 ## Netlify 发布
 
 生产站点使用 `netlify-static` 目录，发布设置保存在 `netlify.toml`。
+自动部署测试
