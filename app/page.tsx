@@ -810,7 +810,7 @@ if (authLoading) {
         </div>
         <div className="period-actions"><span><i /> 已自动保存到当前浏览器</span><button onClick={copyPeriodSummary}>复制本期总结</button></div>
       </section>
-      <footer><span>日迹 · 让工作留下清晰的脉络</span><span>数据仅保存在你的浏览器中</span></footer>
+      <footer><span>日迹 · 让工作留下清晰的脉络</span></footer>
       {toast && <div className="toast">✓ {toast}</div>}
       {quoteEditorOpen && <div className="modal-backdrop" onMouseDown={() => setQuoteEditorOpen(false)}>
         <div className="quote-editor" role="dialog" aria-modal="true" aria-labelledby="quoteEditorTitle" onMouseDown={e => e.stopPropagation()}>
