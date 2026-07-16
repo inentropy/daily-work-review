@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { User } from "@supabase/supabase-js";
+import AuthPanel from "@/components/AuthPanel";
+import { supabase } from "@/lib/supabase";
 
 type Entry = {
   wins: string[];
@@ -63,10 +66,9 @@ const readableDate = (date: Date) => new Intl.DateTimeFormat("zh-CN", { month: "
 
 const periodBounds = (anchor: string, type: SummaryType): PeriodInfo => {
   const source = new Date(`${anchor}T12:00:00`);
-  let start = new Date(source);
-  let end = new Date(source);
-  let label = "";
-
+let start = new Date(source);
+let end: Date;
+let label: string;
   if (type === "week") {
     const mondayOffset = (source.getDay() + 6) % 7;
     start.setDate(source.getDate() - mondayOffset);
@@ -115,9 +117,12 @@ const writeClipboard = async (text: string) => {
 };
 
 export default function Home() {
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [date, setDate] = useState(keyOf(new Date()));
   const [entries, setEntries] = useState<Record<string, Entry>>({});
   const [ready, setReady] = useState(false);
+  const [syncReady, setSyncReady] = useState(false);
   const [saved, setSaved] = useState(true);
   const [toast, setToast] = useState("");
   const [quoteIndex, setQuoteIndex] = useState(0);
@@ -131,15 +136,375 @@ export default function Home() {
   const entry = entries[date] || emptyEntry();
   const yesterday = entries[moveDay(date, -1)];
   const tomorrowKey = moveDay(date, 1);
+// ① 检查 Supabase 登录状态
+useEffect(() => {
+  supabase.auth.getSession().then(({ data }) => {
+    setUser(data.session?.user ?? null);
+    setAuthLoading(false);
+  });
 
-  useEffect(() => {
-    try { setEntries(JSON.parse(localStorage.getItem("daymark-entries") || "{}")); } catch { /* ignore */ }
-    try { setCustomQuotes(JSON.parse(localStorage.getItem("daymark-custom-quotes") || "[]")); } catch { /* ignore */ }
-    try { setPeriodSummaries(JSON.parse(localStorage.getItem("daymark-period-summaries") || "{}")); } catch { /* ignore */ }
-    setQuoteIndex(Math.floor(Math.random() * QUOTES.length));
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((_event, session) => {
+    setUser(session?.user ?? null);
+    setAuthLoading(false);
+  });
+
+  return () => {
+    subscription.unsubscribe();
+  };
+}, []);
+ /* eslint-disable react-hooks/set-state-in-effect */
+useEffect(() => {
+  if (!user) {
+    setReady(false);
+    setSyncReady(false);
+    return;
+  }
+
+  let cancelled = false;
+
+  const loadData = async () => {
+    setReady(false);
+
+    // 每个用户使用独立的本地缓存 key
+    const entriesKey = `daymark-entries:${user.id}`;
+    const summariesKey = `daymark-period-summaries:${user.id}`;
+    const quotesKey = `daymark-custom-quotes:${user.id}`;
+
+    // 安全读取 localStorage
+    const readJson = <T,>(
+      key: string,
+      fallback: T,
+    ): T => {
+      try {
+        const value = localStorage.getItem(key);
+
+        if (!value) {
+          return fallback;
+        }
+
+        return JSON.parse(value) as T;
+      } catch {
+        return fallback;
+      }
+    };
+
+    /*
+     * 兼容你原来没有用户账号时保存的数据。
+     *
+     * daymark-legacy-migrated 用来防止：
+     * 同一个浏览器登录第二个账号时，
+     * 又把第一个账号的旧数据上传给第二个账号。
+     */
+    const legacyMigrated =
+      localStorage.getItem(
+        "daymark-legacy-migrated",
+      ) === "1";
+
+    const legacyEntries =
+      legacyMigrated
+        ? {}
+        : readJson<Record<string, Entry>>(
+            "daymark-entries",
+            {},
+          );
+
+    const legacyPeriodSummaries =
+      legacyMigrated
+        ? {}
+        : readJson<
+            Record<string, PeriodSummary>
+          >(
+            "daymark-period-summaries",
+            {},
+          );
+
+    const legacyCustomQuotes =
+      legacyMigrated
+        ? []
+        : readJson<string[]>(
+            "daymark-custom-quotes",
+            [],
+          );
+
+    // 优先读取当前用户自己的本地缓存
+    const localEntries =
+      readJson<Record<string, Entry>>(
+        entriesKey,
+        legacyEntries,
+      );
+
+    const localPeriodSummaries =
+      readJson<Record<string, PeriodSummary>>(
+        summariesKey,
+        legacyPeriodSummaries,
+      );
+
+    const localCustomQuotes =
+      readJson<string[]>(
+        quotesKey,
+        legacyCustomQuotes,
+      );
+
+    // 查询当前登录用户的 Supabase 数据
+    const { data, error } = await supabase
+      .from("daymark_state")
+      .select(
+        "entries, period_summaries, custom_quotes",
+      )
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (cancelled) {
+      return;
+    }
+
+    // Supabase 查询失败：暂时使用本地数据
+    if (error) {
+      console.error(
+        "加载 Supabase 数据失败：",
+        error,
+      );
+
+      setEntries(localEntries);
+      setPeriodSummaries(
+        localPeriodSummaries,
+      );
+      setCustomQuotes(localCustomQuotes);
+
+      setQuoteIndex(
+        Math.floor(
+          Math.random() * QUOTES.length,
+        ),
+      );
+
+      setReady(true);
+      return;
+    }
+
+    if (data) {
+      /*
+       * Supabase 已经有这个用户的数据：
+       * 云端数据优先
+       */
+
+      const cloudEntries =
+        (data.entries ??
+          {}) as Record<string, Entry>;
+
+      const cloudPeriodSummaries =
+        (data.period_summaries ??
+          {}) as Record<
+          string,
+          PeriodSummary
+        >;
+
+      const cloudCustomQuotes =
+        (data.custom_quotes ??
+          []) as string[];
+
+      setEntries(cloudEntries);
+
+      setPeriodSummaries(
+        cloudPeriodSummaries,
+      );
+
+      setCustomQuotes(
+        cloudCustomQuotes,
+      );
+
+      // 同时写入当前用户自己的本地缓存
+      localStorage.setItem(
+        entriesKey,
+        JSON.stringify(cloudEntries),
+      );
+
+      localStorage.setItem(
+        summariesKey,
+        JSON.stringify(
+          cloudPeriodSummaries,
+        ),
+      );
+
+      localStorage.setItem(
+        quotesKey,
+        JSON.stringify(
+          cloudCustomQuotes,
+        ),
+      );
+      setSyncReady(true);
+    } else {
+      /*
+       * Supabase 没有数据：
+       *
+       * 说明大概率是这个用户第一次登录。
+       * 把以前 localStorage 里的数据上传到 Supabase。
+       */
+
+      const { error: uploadError } =
+        await supabase
+          .from("daymark_state")
+          .upsert(
+            {
+              user_id: user.id,
+
+              entries:
+                localEntries,
+
+              period_summaries:
+                localPeriodSummaries,
+
+              custom_quotes:
+                localCustomQuotes,
+
+              updated_at:
+                new Date().toISOString(),
+            },
+            {
+              onConflict: "user_id",
+            },
+          );
+
+      if (uploadError) {
+        console.error(
+          "首次迁移数据到 Supabase 失败：",
+          uploadError,
+        );
+      } else {
+        // 保存为当前用户自己的缓存
+        localStorage.setItem(
+          entriesKey,
+          JSON.stringify(
+            localEntries,
+          ),
+        );
+
+        localStorage.setItem(
+          summariesKey,
+          JSON.stringify(
+            localPeriodSummaries,
+          ),
+        );
+
+        localStorage.setItem(
+          quotesKey,
+          JSON.stringify(
+            localCustomQuotes,
+          ),
+        );
+
+        /*
+         * 标记旧的无账号 localStorage
+         * 已经迁移过。
+         */
+        localStorage.setItem(
+          "daymark-legacy-migrated",
+          "1",
+        );
+        setSyncReady(true);
+      }
+
+      setEntries(localEntries);
+
+      setPeriodSummaries(
+        localPeriodSummaries,
+      );
+
+      setCustomQuotes(
+        localCustomQuotes,
+      );
+    }
+
+    setQuoteIndex(
+      Math.floor(
+        Math.random() * QUOTES.length,
+      ),
+    );
+
     setReady(true);
-  }, []);
+  };
 
+  void loadData();
+
+  return () => {
+    cancelled = true;
+  };
+}, [user]);
+/* eslint-enable react-hooks/set-state-in-effect */
+useEffect(() => {
+  if (!ready || !syncReady || !user) {
+    return;
+  }
+
+  const timer = window.setTimeout(() => {
+    const saveData = async () => {
+      const entriesKey =
+        `daymark-entries:${user.id}`;
+
+      const summariesKey =
+        `daymark-period-summaries:${user.id}`;
+
+      const quotesKey =
+        `daymark-custom-quotes:${user.id}`;
+
+      // 保存当前用户的本地缓存
+      localStorage.setItem(
+        entriesKey,
+        JSON.stringify(entries),
+      );
+
+      localStorage.setItem(
+        summariesKey,
+        JSON.stringify(periodSummaries),
+      );
+
+      localStorage.setItem(
+        quotesKey,
+        JSON.stringify(customQuotes),
+      );
+
+      // 保存到 Supabase 云端
+      const { error } = await supabase
+        .from("daymark_state")
+        .upsert(
+          {
+            user_id: user.id,
+            entries,
+            period_summaries: periodSummaries,
+            custom_quotes: customQuotes,
+            updated_at: new Date().toISOString(),
+          },
+          {
+            onConflict: "user_id",
+          },
+        );
+
+      if (error) {
+        console.error(
+          "保存到 Supabase 失败：",
+          error,
+        );
+        return;
+      }
+
+      setSaved(true);
+    };
+
+    void saveData();
+  }, 800);
+
+  return () => {
+    window.clearTimeout(timer);
+  };
+}, [
+  entries,
+  periodSummaries,
+  customQuotes,
+  ready,
+  syncReady,
+  user,
+]);
   const nextQuote = () => setQuoteIndex(current => {
     if (allQuotes.length < 2) return current;
     let next = current;
@@ -152,20 +517,110 @@ export default function Home() {
     if (!value) return;
     const next = [...customQuotes, value];
     setCustomQuotes(next);
-    localStorage.setItem("daymark-custom-quotes", JSON.stringify(next));
     setQuoteIndex(QUOTES.length + next.length - 1);
     setNewQuote("");
     setQuoteEditorOpen(false);
   };
 
   useEffect(() => {
-    if (!ready) return;
-    setSaved(false);
-    const timer = setTimeout(() => { localStorage.setItem("daymark-entries", JSON.stringify(entries)); setSaved(true); }, 450);
-    return () => clearTimeout(timer);
-  }, [entries, ready]);
+  if (!ready || !user) {
+    return;
+  }
 
-  const update = (patch: Partial<Entry>) => setEntries(prev => ({ ...prev, [date]: { ...(prev[date] || emptyEntry()), ...patch } }));
+  const timer = setTimeout(() => {
+    const saveData = async () => {
+      const entriesKey =
+        `daymark-entries:${user.id}`;
+
+      const summariesKey =
+        `daymark-period-summaries:${user.id}`;
+
+      const quotesKey =
+        `daymark-custom-quotes:${user.id}`;
+
+      // ① 保存到当前用户自己的 localStorage
+      localStorage.setItem(
+        entriesKey,
+        JSON.stringify(entries),
+      );
+
+      localStorage.setItem(
+        summariesKey,
+        JSON.stringify(
+          periodSummaries,
+        ),
+      );
+
+      localStorage.setItem(
+        quotesKey,
+        JSON.stringify(
+          customQuotes,
+        ),
+      );
+localStorage.setItem(
+  "daymark-legacy-migrated",
+  "1",
+);
+      // ② 同时保存到 Supabase
+      const { error } = await supabase
+        .from("daymark_state")
+        .upsert(
+          {
+            user_id: user.id,
+
+            entries,
+
+            period_summaries:
+              periodSummaries,
+
+            custom_quotes:
+              customQuotes,
+
+            updated_at:
+              new Date().toISOString(),
+          },
+          {
+            onConflict: "user_id",
+          },
+        );
+
+      if (error) {
+        console.error(
+          "保存到 Supabase 失败：",
+          error,
+        );
+
+        return;
+      }
+
+      setSaved(true);
+    };
+
+    void saveData();
+  }, 800);
+
+  return () => {
+    clearTimeout(timer);
+  };
+}, [
+  entries,
+  periodSummaries,
+  customQuotes,
+  ready,
+  user,
+]);
+
+  const update = (patch: Partial<Entry>) => {
+  setSaved(false);
+
+  setEntries(prev => ({
+    ...prev,
+    [date]: {
+      ...(prev[date] || emptyEntry()),
+      ...patch
+    }
+  }));
+};
   const updateList = (field: "wins" | "tomorrow", index: number, value: string) => {
     const next = [...entry[field]]; next[index] = value; update({ [field]: next });
   };
@@ -192,7 +647,6 @@ export default function Home() {
   const updatePeriodSummary = (field: keyof PeriodSummary, value: string) => {
     setPeriodSummaries(previous => {
       const next = { ...previous, [period.storageKey]: { ...(previous[period.storageKey] || emptyPeriodSummary()), [field]: value } };
-      localStorage.setItem("daymark-period-summaries", JSON.stringify(next));
       return next;
     });
   };
@@ -230,13 +684,38 @@ export default function Home() {
     learnings: "重要任务尽量安排在上午，沟通类工作集中处理更高效。",
     tomorrow: ["确认客户最终采购数量", "完成英文报价单并发送", "更新客户跟进表"], mood: 4, focus: 8,
   });
+if (authLoading) {
+  return (
+    <main style={{ padding: "40px" }}>
+      正在检查登录状态...
+    </main>
+  );
+}
+
+if (!user) {
+  return <AuthPanel />;
+}
 
   return (
     <main>
       <header className="topbar">
         <a className="brand" href="#"><span className="brand-mark">✓</span><span>日迹</span></a>
         <div className="top-actions">
-          <span className={`save-state ${saved ? "" : "saving"}`}><i />{saved ? "已自动保存" : "正在保存"}</span>
+          <button
+              type="button"
+              onClick={async () => {
+                const {error} = await supabase.auth.signOut({
+                  scope: "local",
+                });
+
+                if (error) {
+                  console.error("退出登录失败：", error);
+                }
+              }}
+          >
+            退出登录
+          </button>
+          <span className={`save-state ${saved ? "" : "saving"}`}><i/>{saved ? "已自动保存" : "正在保存"}</span>
           <button className="ghost-btn" onClick={copyReport}>复制日报</button>
           <button className="avatar" aria-label="个人中心">工</button>
         </div>

@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-:root { --ink:#1e2d28; --muted:#79837f; --line:#dde4df; --paper:#f6f8f4; --green:#1f6a4c; --lime:#d9ef71; --peach:#f1ddcc; }
+:root { --ink:#1e2d28; --muted:#79837f; --line: #79fc9e; --paper:#f6f8f4; --green:#1f6a4c; --lime:#d9ef71; --peach:#f1ddcc; }
 *{box-sizing:border-box} html{scroll-behavior:smooth} body{margin:0;background:var(--paper);color:var(--ink);font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif} button,input,textarea{font:inherit} button{cursor:pointer} main{min-height:100vh}
 .topbar{height:76px;padding:0 max(4vw,28px);display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);background:rgba(246,248,244,.92);position:sticky;top:0;z-index:10;backdrop-filter:blur(14px)}
 .brand{display:flex;align-items:center;gap:11px;color:var(--ink);text-decoration:none;font-size:22px;font-weight:800;letter-spacing:.1em}.brand-mark{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:var(--ink);color:var(--lime);font-size:16px}.top-actions{display:flex;align-items:center;gap:18px}.save-state{font-size:12px;color:#77837d;display:flex;align-items:center;gap:7px}.save-state i{width:7px;height:7px;border-radius:50%;background:#63a176}.save-state.saving i{background:#e0a64e;animation:pulse .8s infinite}.ghost-btn{border:1px solid #cfd7d2;background:white;border-radius:99px;padding:9px 16px;color:var(--ink);font-size:13px}.avatar{border:0;background:var(--peach);width:36px;height:36px;border-radius:50%;color:#7b4e35;font-weight:700}
