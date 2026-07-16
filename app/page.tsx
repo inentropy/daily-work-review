@@ -4,13 +4,22 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import AuthPanel from "@/components/AuthPanel";
 import { supabase } from "@/lib/supabase";
+import {
+  carryForwardPlans,
+  createPlanTask,
+  normalizePlanTasks,
+  PLAN_STATUSES,
+  type PlanStatus,
+  type PlanTask,
+} from "@/lib/task-plans";
 
 type Entry = {
   wins: string[];
   progress: string;
   blockers: string;
   learnings: string;
-  tomorrow: string[];
+  tomorrow: PlanTask[];
+  carriedTaskIds: string[];
   mood: number;
   focus: number;
 };
@@ -33,7 +42,7 @@ type PeriodInfo = {
 };
 
 const emptyEntry = (): Entry => ({
-  wins: [""], progress: "", blockers: "", learnings: "", tomorrow: [""], mood: 4, focus: 7,
+  wins: [""], progress: "", blockers: "", learnings: "", tomorrow: [], carriedTaskIds: [], mood: 4, focus: 7,
 });
 
 const emptyPeriodSummary = (): PeriodSummary => ({ achievements: "", growth: "", challenges: "", nextFocus: "" });
@@ -96,8 +105,74 @@ let label: string;
 };
 
 const hasEntryContent = (entry: Entry) => Boolean(
-  entry.wins?.some(Boolean) || entry.progress?.trim() || entry.blockers?.trim() || entry.learnings?.trim() || entry.tomorrow?.some(Boolean),
+  entry.wins?.some(Boolean) || entry.progress?.trim() || entry.blockers?.trim() || entry.learnings?.trim() || entry.tomorrow?.some((task) => task.text.trim()),
 );
+
+const normalizeEntries = (
+  records: Record<string, Entry>,
+): Record<string, Entry> =>
+  Object.fromEntries(
+    Object.entries(records).map(([recordDate, value]) => [
+      recordDate,
+      {
+        ...emptyEntry(),
+        ...value,
+        wins: Array.isArray(value?.wins)
+          ? value.wins
+          : [""],
+        tomorrow: normalizePlanTasks(
+          value?.tomorrow,
+          recordDate,
+        ),
+        carriedTaskIds: Array.isArray(
+          value?.carriedTaskIds,
+        )
+          ? value.carriedTaskIds.filter(
+              (id): id is string =>
+                typeof id === "string",
+            )
+          : [],
+      },
+    ]),
+  );
+
+const carryEntriesForDate = (
+  records: Record<string, Entry>,
+  targetDate: string,
+): Record<string, Entry> => {
+  const previousDate = moveDay(targetDate, -1);
+  const previousEntry = records[previousDate];
+
+  if (!previousEntry) {
+    return records;
+  }
+
+  const currentEntry =
+    records[targetDate] || emptyEntry();
+  const carried = carryForwardPlans({
+    previousPlans: previousEntry.tomorrow,
+    currentPlans: currentEntry.tomorrow,
+    carriedTaskIds: currentEntry.carriedTaskIds,
+    previousDate,
+  });
+
+  if (
+    carried.added === 0 &&
+    carried.carriedTaskIds.length ===
+      currentEntry.carriedTaskIds.length
+  ) {
+    return records;
+  }
+
+  return {
+    ...records,
+    [targetDate]: {
+      ...currentEntry,
+      tomorrow: carried.plans,
+      carriedTaskIds: carried.carriedTaskIds,
+    },
+  };
+};
 
 const writeClipboard = async (text: string) => {
   try {
@@ -236,10 +311,16 @@ useEffect(() => {
           );
 
     // 优先读取当前用户自己的本地缓存
-    const localEntries =
+    const localEntries = normalizeEntries(
       readJson<Record<string, Entry>>(
         entriesKey,
         legacyEntries,
+      ),
+    );
+    const localEntriesWithCarry =
+      carryEntriesForDate(
+        localEntries,
+        keyOf(new Date()),
       );
 
     const localPeriodSummaries =
@@ -274,7 +355,7 @@ useEffect(() => {
         error,
       );
 
-      setEntries(localEntries);
+      setEntries(localEntriesWithCarry);
       setPeriodSummaries(
         localPeriodSummaries,
       );
@@ -297,9 +378,15 @@ useEffect(() => {
        * 云端数据优先
        */
 
-      const cloudEntries =
+      const cloudEntries = normalizeEntries(
         (data.entries ??
-          {}) as Record<string, Entry>;
+          {}) as Record<string, Entry>,
+      );
+      const cloudEntriesWithCarry =
+        carryEntriesForDate(
+          cloudEntries,
+          keyOf(new Date()),
+        );
 
       const cloudPeriodSummaries =
         (data.period_summaries ??
@@ -312,7 +399,7 @@ useEffect(() => {
         (data.custom_quotes ??
           []) as string[];
 
-      setEntries(cloudEntries);
+      setEntries(cloudEntriesWithCarry);
 
       setPeriodSummaries(
         cloudPeriodSummaries,
@@ -330,7 +417,7 @@ useEffect(() => {
       // 同时写入当前用户自己的本地缓存
       localStorage.setItem(
         entriesKey,
-        JSON.stringify(cloudEntries),
+        JSON.stringify(cloudEntriesWithCarry),
       );
 
       localStorage.setItem(
@@ -364,7 +451,7 @@ useEffect(() => {
               user_id: user.id,
 
               entries:
-                localEntries,
+                localEntriesWithCarry,
 
               period_summaries:
                 localPeriodSummaries,
@@ -390,8 +477,8 @@ useEffect(() => {
         // 保存为当前用户自己的缓存
         localStorage.setItem(
           entriesKey,
-          JSON.stringify(
-            localEntries,
+            JSON.stringify(
+              localEntriesWithCarry,
           ),
         );
 
@@ -418,7 +505,7 @@ useEffect(() => {
           "1",
         );
         lastSyncedSnapshot.current = JSON.stringify({
-          entries: localEntries,
+          entries: localEntriesWithCarry,
           periodSummaries: localPeriodSummaries,
           customQuotes: localCustomQuotes,
         });
@@ -426,7 +513,7 @@ useEffect(() => {
         setSyncStatus("synced");
       }
 
-      setEntries(localEntries);
+      setEntries(localEntriesWithCarry);
 
       setPeriodSummaries(
         localPeriodSummaries,
@@ -576,13 +663,63 @@ useEffect(() => {
     }
   }));
 };
-  const updateList = (field: "wins" | "tomorrow", index: number, value: string) => {
-    const next = [...entry[field]]; next[index] = value; update({ [field]: next });
+  const selectDate = (nextDate: string) => {
+    setEntries((previous) =>
+      carryEntriesForDate(previous, nextDate),
+    );
+    setDate(nextDate);
   };
-  const addItem = (field: "wins" | "tomorrow") => update({ [field]: [...entry[field], ""] });
-  const removeItem = (field: "wins" | "tomorrow", index: number) => update({ [field]: entry[field].filter((_, i) => i !== index) });
+  const updateWin = (index: number, value: string) => {
+    const next = [...entry.wins];
+    next[index] = value;
+    update({ wins: next });
+  };
+  const addWin = () =>
+    update({ wins: [...entry.wins, ""] });
+  const removeWin = (index: number) =>
+    update({
+      wins: entry.wins.filter(
+        (_, itemIndex) => itemIndex !== index,
+      ),
+    });
+  const addPlan = () =>
+    update({
+      tomorrow: [
+        ...entry.tomorrow,
+        createPlanTask(),
+      ],
+    });
+  const updatePlan = (
+    taskId: string,
+    patch: Partial<
+      Pick<PlanTask, "text" | "status">
+    >,
+  ) =>
+    update({
+      tomorrow: entry.tomorrow.map((task) =>
+        task.id === taskId
+          ? { ...task, ...patch }
+          : task,
+      ),
+    });
+  const removePlan = (taskId: string) =>
+    update({
+      tomorrow: entry.tomorrow.filter(
+        (task) => task.id !== taskId,
+      ),
+    });
   const doneCount = entry.wins.filter(Boolean).length;
-  const plannedCount = entry.tomorrow.filter(Boolean).length;
+  const plannedCount = entry.tomorrow.filter(
+    (task) => task.text.trim(),
+  ).length;
+  const completedPlanCount = entry.tomorrow.filter(
+    (task) =>
+      task.text.trim() &&
+      task.status === "completed",
+  ).length;
+  const carriedPlanCount = entry.tomorrow.filter(
+    (task) => task.carriedFrom,
+  ).length;
 
   const period = useMemo(() => periodBounds(summaryAnchor, summaryType), [summaryAnchor, summaryType]);
   const periodRecords = useMemo(() => Object.entries(entries)
@@ -593,7 +730,14 @@ useEffect(() => {
   const periodProgress = useMemo(() => periodRecords
     .filter(([, value]) => value.progress.trim())
     .map(([recordDate, value]) => ({ date: recordDate, text: value.progress.trim() })), [periodRecords]);
-  const periodPlans = periodRecords.reduce((count, [, value]) => count + value.tomorrow.filter(Boolean).length, 0);
+  const periodPlans = periodRecords.reduce(
+    (count, [, value]) =>
+      count +
+      value.tomorrow.filter((task) =>
+        task.text.trim(),
+      ).length,
+    0,
+  );
   const averageFocus = periodRecords.length
     ? (periodRecords.reduce((sum, [, value]) => sum + (Number(value.focus) || 0), 0) / periodRecords.length).toFixed(1)
     : "—";
@@ -621,7 +765,7 @@ useEffect(() => {
   }, [date]);
 
   const copyReport = async () => {
-    const text = `【${date} 工作日报】\n\n今日完成：\n${entry.wins.filter(Boolean).map((x, i) => `${i + 1}. ${x}`).join("\n") || "暂无"}\n\n进展与产出：\n${entry.progress || "暂无"}\n\n问题与思考：\n${entry.blockers || "暂无"}\n\n今日收获：\n${entry.learnings || "暂无"}\n\n明日计划：\n${entry.tomorrow.filter(Boolean).map((x, i) => `${i + 1}. ${x}`).join("\n") || "暂无"}`;
+    const text = `【${date} 工作日报】\n\n今日完成：\n${entry.wins.filter(Boolean).map((x, i) => `${i + 1}. ${x}`).join("\n") || "暂无"}\n\n进展与产出：\n${entry.progress || "暂无"}\n\n问题与思考：\n${entry.blockers || "暂无"}\n\n今日收获：\n${entry.learnings || "暂无"}\n\n明日计划：\n${entry.tomorrow.filter((task) => task.text.trim()).map((task, i) => `${i + 1}. [${PLAN_STATUSES.find((status) => status.value === task.status)?.label}] ${task.text}`).join("\n") || "暂无"}`;
     await writeClipboard(text); setToast("日报已复制"); setTimeout(() => setToast(""), 1800);
   };
 
@@ -637,7 +781,11 @@ useEffect(() => {
     progress: "报价方案已完成初稿，关键产品参数已与技术部门确认。客户反馈积极，等待最终数量确认。",
     blockers: "部分海外认证资料仍需补齐；下一步提前建立资料清单，减少临时查找。",
     learnings: "重要任务尽量安排在上午，沟通类工作集中处理更高效。",
-    tomorrow: ["确认客户最终采购数量", "完成英文报价单并发送", "更新客户跟进表"], mood: 4, focus: 8,
+    tomorrow: [
+      { ...createPlanTask(), text: "确认客户最终采购数量" },
+      { ...createPlanTask(), text: "完成英文报价单并发送", status: "in_progress" },
+      { ...createPlanTask(), text: "更新客户跟进表" },
+    ], mood: 4, focus: 8,
   });
 if (authLoading) {
   return (
@@ -706,17 +854,17 @@ if (authLoading) {
           <p className="subtitle">记录今天的行动，复盘昨天的得失，为明天留一盏灯。</p>
         </div>
         <div className="date-control">
-          <button onClick={() => setDate(moveDay(date, -1))} aria-label="前一天">←</button>
-          <label><span>{displayDate}</span><small>{date}</small><input type="date" value={date} onChange={e => setDate(e.target.value)} /></label>
-          <button onClick={() => setDate(moveDay(date, 1))} aria-label="后一天">→</button>
-          {date !== keyOf(new Date()) && <button className="today-btn" onClick={() => setDate(keyOf(new Date()))}>回到今天</button>}
+          <button onClick={() => selectDate(moveDay(date, -1))} aria-label="前一天">←</button>
+          <label><span>{displayDate}</span><small>{date}</small><input type="date" value={date} onChange={e => selectDate(e.target.value)} /></label>
+          <button onClick={() => selectDate(moveDay(date, 1))} aria-label="后一天">→</button>
+          {date !== keyOf(new Date()) && <button className="today-btn" onClick={() => selectDate(keyOf(new Date()))}>回到今天</button>}
         </div>
       </section>
 
       <section className="stats">
         <div><span>今日完成</span><strong>{doneCount}</strong><small>件重要事项</small></div>
         <div><span>专注状态</span><strong>{entry.focus}<b>/10</b></strong><small>{entry.focus >= 8 ? "状态很棒" : entry.focus >= 6 ? "稳步推进" : "注意休息"}</small></div>
-        <div><span>明日预设</span><strong>{plannedCount}</strong><small>项优先任务</small></div>
+        <div><span>明日待办</span><strong>{plannedCount}</strong><small>{completedPlanCount} 项已完成</small></div>
         <div className="quote"><span>今日一句</span><p>“{allQuotes[quoteIndex] || QUOTES[0]}”</p><div className="quote-actions"><button onClick={() => setQuoteEditorOpen(true)} aria-label="添加语录" title="添加语录">＋</button><button onClick={nextQuote} aria-label="换一句" title="换一句">↻</button></div></div>
       </section>
 
@@ -747,8 +895,8 @@ if (authLoading) {
         <article className="panel today">
           <div className="panel-head"><div className="number">02</div><div><p>CAPTURE TODAY</p><h2>总结今天</h2></div><span className="tag active">正在记录</span></div>
           <label className="field-label">今日完成</label>
-          <div className="task-list">{entry.wins.map((item, i) => <div className="task" key={i}><span className={item ? "checked" : ""}>{item ? "✓" : i + 1}</span><input value={item} onChange={e => updateList("wins", i, e.target.value)} placeholder="我今天完成了什么？"/><button onClick={() => removeItem("wins", i)}>×</button></div>)}</div>
-          <button className="add-btn" onClick={() => addItem("wins")}>＋ 添加一项完成</button>
+          <div className="task-list">{entry.wins.map((item, i) => <div className="task" key={i}><span className={item ? "checked" : ""}>{item ? "✓" : i + 1}</span><input value={item} onChange={e => updateWin(i, e.target.value)} placeholder="我今天完成了什么？"/><button onClick={() => removeWin(i)}>×</button></div>)}</div>
+          <button className="add-btn" onClick={addWin}>＋ 添加一项完成</button>
           <label className="field-label">进展与产出</label>
           <textarea className="large" value={entry.progress} onChange={e => update({ progress: e.target.value })} placeholder="记录关键进展、数据、成果，或值得分享的细节……" />
           <div className="sliders">
@@ -759,10 +907,37 @@ if (authLoading) {
 
         <article className="panel tomorrow">
           <div className="panel-head"><div className="number">03</div><div><p>PLAN AHEAD</p><h2>预设明天</h2></div><span className="tag">提前一步</span></div>
-          <div className="tomorrow-date"><span>明日</span><strong>{new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", weekday: "short" }).format(new Date(`${tomorrowKey}T12:00:00`))}</strong></div>
-          <label className="field-label">最重要的三件事</label>
-          <div className="plan-list">{entry.tomorrow.map((item, i) => <div className="plan" key={i}><span>{pad(i + 1)}</span><input value={item} onChange={e => updateList("tomorrow", i, e.target.value)} placeholder={i === 0 ? "明天最重要的事情是……" : "接下来要推进……"}/><button onClick={() => removeItem("tomorrow", i)}>×</button></div>)}</div>
-          <button className="add-btn dark" onClick={() => addItem("tomorrow")}>＋ 添加一项计划</button>
+          <div className="tomorrow-date"><span>明日</span><strong>{new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", weekday: "short" }).format(new Date(`${tomorrowKey}T12:00:00`))}</strong>{carriedPlanCount > 0 && <b>顺延 {carriedPlanCount} 项</b>}</div>
+          <label className="field-label">待办事项与状态</label>
+          {entry.tomorrow.length ? (
+            <div className="plan-list">
+              {entry.tomorrow.map((task, i) => (
+                <div className={`plan status-${task.status}`} key={task.id}>
+                  <span>{task.status === "completed" ? "✓" : pad(i + 1)}</span>
+                  <div className="plan-main">
+                    <input
+                      value={task.text}
+                      onChange={(event) => updatePlan(task.id, { text: event.target.value })}
+                      placeholder={i === 0 ? "明天最重要的事情是……" : "接下来要推进……"}
+                    />
+                    {task.carriedFrom && <small>由 {task.carriedFrom} 自动顺延</small>}
+                  </div>
+                  <select
+                    className="plan-status"
+                    value={task.status}
+                    onChange={(event) => updatePlan(task.id, { status: event.target.value as PlanStatus })}
+                    aria-label={`${task.text || `第 ${i + 1} 项任务`}的状态`}
+                  >
+                    {PLAN_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
+                  </select>
+                  <button onClick={() => removePlan(task.id)} aria-label="删除任务">×</button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="plan-empty"><span>○</span><p>明天还没有待办事项<br/><small>添加任务后，可以随时更新推进状态。</small></p></div>
+          )}
+          <button className="add-btn dark" onClick={addPlan}>＋ 添加一项待办</button>
           <div className="focus-note"><span>✦</span><div><strong>给明天的提醒</strong><p>优先完成第一件事，再打开消息列表。给重要的事留出不被打扰的时间。</p></div></div>
           {!entry.progress && !entry.wins.some(Boolean) && <button className="example" onClick={seed}>填入示例，快速体验</button>}
         </article>

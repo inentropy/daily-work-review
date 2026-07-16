@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import {
+  carryForwardPlans,
+  normalizePlanTasks,
+} from "../lib/task-plans.ts";
 
 test("exports the daily review website", async () => {
   const html = await readFile(
@@ -47,4 +51,47 @@ test("uses one cloud autosave flow with clear sync states", async () => {
   assert.match(page, /正在同步云端/);
   assert.match(page, /云端已同步/);
   assert.match(page, /云端同步失败/);
+});
+
+test("upgrades legacy plans and carries unfinished tasks once", () => {
+  const previousPlans = normalizePlanTasks(
+    [
+      "跟进客户报价",
+      {
+        id: "finished-task",
+        text: "发送周报",
+        status: "completed",
+      },
+    ],
+    "2026-07-15",
+  );
+
+  assert.equal(previousPlans[0].status, "todo");
+
+  const firstCarry = carryForwardPlans({
+    previousPlans,
+    currentPlans: [],
+    carriedTaskIds: [],
+    previousDate: "2026-07-15",
+  });
+
+  assert.equal(firstCarry.added, 1);
+  assert.equal(
+    firstCarry.plans[0].text,
+    "跟进客户报价",
+  );
+  assert.equal(
+    firstCarry.plans[0].carriedFrom,
+    "2026-07-15",
+  );
+
+  const secondCarry = carryForwardPlans({
+    previousPlans,
+    currentPlans: firstCarry.plans,
+    carriedTaskIds: firstCarry.carriedTaskIds,
+    previousDate: "2026-07-15",
+  });
+
+  assert.equal(secondCarry.added, 0);
+  assert.equal(secondCarry.plans.length, 1);
 });
