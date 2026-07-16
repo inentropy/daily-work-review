@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import AuthPanel from "@/components/AuthPanel";
 import { supabase } from "@/lib/supabase";
@@ -16,6 +16,7 @@ type Entry = {
 };
 
 type SummaryType = "week" | "month" | "quarter" | "year";
+type SyncStatus = "syncing" | "synced" | "error";
 
 type PeriodSummary = {
   achievements: string;
@@ -123,7 +124,7 @@ export default function Home() {
   const [entries, setEntries] = useState<Record<string, Entry>>({});
   const [ready, setReady] = useState(false);
   const [syncReady, setSyncReady] = useState(false);
-  const [saved, setSaved] = useState(true);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("syncing");
   const [toast, setToast] = useState("");
   const [quoteIndex, setQuoteIndex] = useState(0);
   const [customQuotes, setCustomQuotes] = useState<string[]>([]);
@@ -132,6 +133,8 @@ export default function Home() {
   const [summaryType, setSummaryType] = useState<SummaryType>("week");
   const [summaryAnchor, setSummaryAnchor] = useState(keyOf(new Date()));
   const [periodSummaries, setPeriodSummaries] = useState<Record<string, PeriodSummary>>({});
+  const lastSyncedSnapshot = useRef("");
+  const syncAttempt = useRef(0);
   const allQuotes = useMemo(() => [...QUOTES, ...customQuotes], [customQuotes]);
   const entry = entries[date] || emptyEntry();
   const yesterday = entries[moveDay(date, -1)];
@@ -159,6 +162,8 @@ useEffect(() => {
   if (!user) {
     setReady(false);
     setSyncReady(false);
+    setSyncStatus("syncing");
+    lastSyncedSnapshot.current = "";
     return;
   }
 
@@ -166,6 +171,8 @@ useEffect(() => {
 
   const loadData = async () => {
     setReady(false);
+    setSyncReady(false);
+    setSyncStatus("syncing");
 
     // 每个用户使用独立的本地缓存 key
     const entriesKey = `daymark-entries:${user.id}`;
@@ -272,6 +279,7 @@ useEffect(() => {
         localPeriodSummaries,
       );
       setCustomQuotes(localCustomQuotes);
+      setSyncStatus("error");
 
       setQuoteIndex(
         Math.floor(
@@ -313,6 +321,11 @@ useEffect(() => {
       setCustomQuotes(
         cloudCustomQuotes,
       );
+      lastSyncedSnapshot.current = JSON.stringify({
+        entries: cloudEntries,
+        periodSummaries: cloudPeriodSummaries,
+        customQuotes: cloudCustomQuotes,
+      });
 
       // 同时写入当前用户自己的本地缓存
       localStorage.setItem(
@@ -334,6 +347,7 @@ useEffect(() => {
         ),
       );
       setSyncReady(true);
+      setSyncStatus("synced");
     } else {
       /*
        * Supabase 没有数据：
@@ -371,6 +385,7 @@ useEffect(() => {
           "首次迁移数据到 Supabase 失败：",
           uploadError,
         );
+        setSyncStatus("error");
       } else {
         // 保存为当前用户自己的缓存
         localStorage.setItem(
@@ -402,7 +417,13 @@ useEffect(() => {
           "daymark-legacy-migrated",
           "1",
         );
+        lastSyncedSnapshot.current = JSON.stringify({
+          entries: localEntries,
+          periodSummaries: localPeriodSummaries,
+          customQuotes: localCustomQuotes,
+        });
         setSyncReady(true);
+        setSyncStatus("synced");
       }
 
       setEntries(localEntries);
@@ -433,37 +454,55 @@ useEffect(() => {
 }, [user]);
 /* eslint-enable react-hooks/set-state-in-effect */
 useEffect(() => {
-  if (!ready || !syncReady || !user) {
+  if (!ready || !user) {
     return;
   }
 
+  const entriesKey =
+    `daymark-entries:${user.id}`;
+
+  const summariesKey =
+    `daymark-period-summaries:${user.id}`;
+
+  const quotesKey =
+    `daymark-custom-quotes:${user.id}`;
+
+  // 无论云端是否可用，都先保存当前用户的本地缓存。
+  localStorage.setItem(
+    entriesKey,
+    JSON.stringify(entries),
+  );
+
+  localStorage.setItem(
+    summariesKey,
+    JSON.stringify(periodSummaries),
+  );
+
+  localStorage.setItem(
+    quotesKey,
+    JSON.stringify(customQuotes),
+  );
+
+  if (!syncReady) {
+    return;
+  }
+
+  const snapshot = JSON.stringify({
+    entries,
+    periodSummaries,
+    customQuotes,
+  });
+
+  if (snapshot === lastSyncedSnapshot.current) {
+    setSyncStatus("synced");
+    return;
+  }
+
+  const attempt = ++syncAttempt.current;
+  setSyncStatus("syncing");
+
   const timer = window.setTimeout(() => {
     const saveData = async () => {
-      const entriesKey =
-        `daymark-entries:${user.id}`;
-
-      const summariesKey =
-        `daymark-period-summaries:${user.id}`;
-
-      const quotesKey =
-        `daymark-custom-quotes:${user.id}`;
-
-      // 保存当前用户的本地缓存
-      localStorage.setItem(
-        entriesKey,
-        JSON.stringify(entries),
-      );
-
-      localStorage.setItem(
-        summariesKey,
-        JSON.stringify(periodSummaries),
-      );
-
-      localStorage.setItem(
-        quotesKey,
-        JSON.stringify(customQuotes),
-      );
-
       // 保存到 Supabase 云端
       const { error } = await supabase
         .from("daymark_state")
@@ -480,15 +519,21 @@ useEffect(() => {
           },
         );
 
+      if (attempt !== syncAttempt.current) {
+        return;
+      }
+
       if (error) {
         console.error(
           "保存到 Supabase 失败：",
           error,
         );
+        setSyncStatus("error");
         return;
       }
 
-      setSaved(true);
+      lastSyncedSnapshot.current = snapshot;
+      setSyncStatus("synced");
     };
 
     void saveData();
@@ -522,97 +567,7 @@ useEffect(() => {
     setQuoteEditorOpen(false);
   };
 
-  useEffect(() => {
-  if (!ready || !user) {
-    return;
-  }
-
-  const timer = setTimeout(() => {
-    const saveData = async () => {
-      const entriesKey =
-        `daymark-entries:${user.id}`;
-
-      const summariesKey =
-        `daymark-period-summaries:${user.id}`;
-
-      const quotesKey =
-        `daymark-custom-quotes:${user.id}`;
-
-      // ① 保存到当前用户自己的 localStorage
-      localStorage.setItem(
-        entriesKey,
-        JSON.stringify(entries),
-      );
-
-      localStorage.setItem(
-        summariesKey,
-        JSON.stringify(
-          periodSummaries,
-        ),
-      );
-
-      localStorage.setItem(
-        quotesKey,
-        JSON.stringify(
-          customQuotes,
-        ),
-      );
-localStorage.setItem(
-  "daymark-legacy-migrated",
-  "1",
-);
-      // ② 同时保存到 Supabase
-      const { error } = await supabase
-        .from("daymark_state")
-        .upsert(
-          {
-            user_id: user.id,
-
-            entries,
-
-            period_summaries:
-              periodSummaries,
-
-            custom_quotes:
-              customQuotes,
-
-            updated_at:
-              new Date().toISOString(),
-          },
-          {
-            onConflict: "user_id",
-          },
-        );
-
-      if (error) {
-        console.error(
-          "保存到 Supabase 失败：",
-          error,
-        );
-
-        return;
-      }
-
-      setSaved(true);
-    };
-
-    void saveData();
-  }, 800);
-
-  return () => {
-    clearTimeout(timer);
-  };
-}, [
-  entries,
-  periodSummaries,
-  customQuotes,
-  ready,
-  user,
-]);
-
   const update = (patch: Partial<Entry>) => {
-  setSaved(false);
-
   setEntries(prev => ({
     ...prev,
     [date]: {
@@ -692,9 +647,24 @@ if (authLoading) {
   );
 }
 
-if (!user) {
-  return <AuthPanel />;
-}
+  if (!user) {
+    return <AuthPanel />;
+  }
+
+  const syncState = {
+    syncing: {
+      label: "正在同步云端",
+      title: "数据已保存到本机，正在同步到云端",
+    },
+    synced: {
+      label: "云端已同步",
+      title: "当前内容已保存到本机和云端",
+    },
+    error: {
+      label: "云端同步失败",
+      title: "内容已保存到本机，请检查网络后刷新重试",
+    },
+  }[syncStatus];
 
   return (
     <main>
@@ -715,7 +685,15 @@ if (!user) {
           >
             退出登录
           </button>
-          <span className={`save-state ${saved ? "" : "saving"}`}><i/>{saved ? "已自动保存" : "正在保存"}</span>
+          <span
+            className={`save-state ${syncStatus}`}
+            role="status"
+            aria-live="polite"
+            title={syncState.title}
+          >
+            <i />
+            {syncState.label}
+          </span>
           <button className="ghost-btn" onClick={copyReport}>复制日报</button>
           <button className="avatar" aria-label="个人中心">工</button>
         </div>
