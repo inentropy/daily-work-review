@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import AuthPanel from "@/components/AuthPanel";
+import { ChangelogDialog } from "@/components/ChangelogDialog";
 import { supabase } from "@/lib/supabase";
 import {
   carryForwardPlans,
@@ -992,7 +993,10 @@ if (authLoading) {
         </div>
         <div className="period-actions"><span><i /> 已自动保存到当前浏览器</span><button onClick={copyPeriodSummary}>复制本期总结</button></div>
       </section>
-      <footer><span>日迹 · 让工作留下清晰的脉络</span></footer>
+      <footer>
+        <span>日迹 · 让工作留下清晰的脉络</span>
+        <ChangelogDialog />
+      </footer>
       {toast && <div className="toast">✓ {toast}</div>}
       {quoteEditorOpen && <div className="modal-backdrop" onMouseDown={() => setQuoteEditorOpen(false)}>
         <div className="quote-editor" role="dialog" aria-modal="true" aria-labelledby="quoteEditorTitle" onMouseDown={e => e.stopPropagation()}>

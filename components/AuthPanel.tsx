@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { CURRENT_VERSION_LABEL } from "@/lib/changelog";
 import { supabase } from "@/lib/supabase";
 
 type AuthMode = "signIn" | "signUp";
@@ -286,7 +287,7 @@ export default function AuthPanel() {
             </p>
           </div>
 
-          <p className="auth-footer">日迹 · 让认真工作的每一天都有迹可循</p>
+          <p className="auth-footer">日迹 · 让认真工作的每一天都有迹可循 · {CURRENT_VERSION_LABEL}</p>
         </div>
       </section>
     </main>

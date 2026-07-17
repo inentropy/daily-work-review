@@ -5,6 +5,11 @@ import {
   carryForwardPlans,
   normalizePlanTasks,
 } from "../lib/task-plans.ts";
+import {
+  CHANGELOG,
+  CURRENT_VERSION,
+  CURRENT_VERSION_LABEL,
+} from "../lib/changelog.ts";
 
 test("exports the daily review website", async () => {
   const html = await readFile(
@@ -37,6 +42,17 @@ test("keeps the existing browser storage keys", async () => {
   assert.match(page, /daymark-entries/);
   assert.match(page, /daymark-period-summaries/);
   assert.match(page, /daymark-custom-quotes/);
+});
+
+test("keeps the visible changelog aligned with the project version", async () => {
+  const packageJson = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8"),
+  );
+
+  assert.equal(CURRENT_VERSION, packageJson.version);
+  assert.equal(CURRENT_VERSION_LABEL, "Alpha 0.0.1");
+  assert.equal(CHANGELOG[0].version, CURRENT_VERSION_LABEL);
+  assert.ok(CHANGELOG[0].changes.length > 0);
 });
 
 test("uses one cloud autosave flow with clear sync states", async () => {
