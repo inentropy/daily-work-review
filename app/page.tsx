@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
 import AuthPanel from "@/components/AuthPanel";
 import { ChangelogDialog } from "@/components/ChangelogDialog";
-import { FeedbackPanel } from "@/components/FeedbackPanel";
 import { supabase } from "@/lib/supabase";
 import {
   carryForwardPlans,
@@ -994,10 +994,14 @@ if (authLoading) {
         </div>
         <div className="period-actions"><span><i /> 已自动保存到当前浏览器</span><button onClick={copyPeriodSummary}>复制本期总结</button></div>
       </section>
-      <FeedbackPanel userEmail={user.email} />
       <footer>
         <span>日迹 · 让工作留下清晰的脉络</span>
-        <ChangelogDialog />
+        <div className="footer-actions">
+          <Link className="feedback-link" href="/feedback/">
+            留言反馈 <b aria-hidden="true">↗</b>
+          </Link>
+          <ChangelogDialog />
+        </div>
       </footer>
       {toast && <div className="toast">✓ {toast}</div>}
       {quoteEditorOpen && <div className="modal-backdrop" onMouseDown={() => setQuoteEditorOpen(false)}>

@@ -50,7 +50,7 @@ test("keeps the visible changelog aligned with the project version", async () =>
   );
 
   assert.equal(CURRENT_VERSION, packageJson.version);
-  assert.equal(CURRENT_VERSION_LABEL, "Alpha 0.0.2");
+  assert.equal(CURRENT_VERSION_LABEL, "Alpha 0.0.3");
   assert.equal(CHANGELOG[0].version, CURRENT_VERSION_LABEL);
   assert.ok(CHANGELOG[0].changes.length > 0);
 });
@@ -70,6 +70,27 @@ test("routes feedback to the owner email with useful context", async () => {
   assert.match(feedbackPanel, /_honey/);
   assert.match(feedbackPanel, /response\.json\(\)/);
   assert.match(feedbackPanel, /result\?\.success === false/);
+});
+
+test("keeps the feedback form on a dedicated subpage", async () => {
+  const homePage = await readFile(
+    new URL("../app/page.tsx", import.meta.url),
+    "utf8",
+  );
+  const feedbackPage = await readFile(
+    new URL("../app/feedback/page.tsx", import.meta.url),
+    "utf8",
+  );
+  const feedbackHtml = await readFile(
+    new URL("../out/feedback/index.html", import.meta.url),
+    "utf8",
+  );
+
+  assert.doesNotMatch(homePage, /<FeedbackPanel/);
+  assert.match(homePage, /href="\/feedback\/"/);
+  assert.match(feedbackPage, /<FeedbackPanel userEmail=\{user\.email\}/);
+  assert.match(feedbackPage, /返回工作台/);
+  assert.match(feedbackHtml, /留言反馈｜日迹/);
 });
 
 test("uses one cloud autosave flow with clear sync states", async () => {

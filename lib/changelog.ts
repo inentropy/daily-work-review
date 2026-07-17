@@ -13,10 +13,21 @@ export type ChangelogRelease = {
   changes: ChangelogItem[];
 };
 
-export const CURRENT_VERSION = "0.0.2-alpha.0";
-export const CURRENT_VERSION_LABEL = "Alpha 0.0.2";
+export const CURRENT_VERSION = "0.0.3-alpha.0";
+export const CURRENT_VERSION_LABEL = "Alpha 0.0.3";
 
 export const CHANGELOG: ChangelogRelease[] = [
+  {
+    version: "Alpha 0.0.3",
+    date: "2026-07-17",
+    title: "更轻盈的工作台",
+    summary: "把完整留言表单迁移到独立页面，让主页继续专注于每日复盘与周期总结。",
+    changes: [
+      { type: "优化", text: "留言反馈迁移至独立子页面，减少主页占用空间。" },
+      { type: "新增", text: "主页页脚增加轻量留言入口，随时可以进入反馈页面。" },
+      { type: "优化", text: "反馈子页面沿用登录状态、产品视觉和移动端适配。" },
+    ],
+  },
   {
     version: "Alpha 0.0.2",
     date: "2026-07-17",
