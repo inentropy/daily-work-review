@@ -13,10 +13,22 @@ export type ChangelogRelease = {
   changes: ChangelogItem[];
 };
 
-export const CURRENT_VERSION = "0.0.1-alpha.0";
-export const CURRENT_VERSION_LABEL = "Alpha 0.0.1";
+export const CURRENT_VERSION = "0.0.2-alpha.0";
+export const CURRENT_VERSION_LABEL = "Alpha 0.0.2";
 
 export const CHANGELOG: ChangelogRelease[] = [
+  {
+    version: "Alpha 0.0.2",
+    date: "2026-07-17",
+    title: "留言反馈通道",
+    summary: "让每一位使用者都能从日迹里直接发送建议、问题和真实感受。",
+    changes: [
+      { type: "新增", text: "新增留言反馈板块，支持功能建议、问题反馈、体验优化和其他留言。" },
+      { type: "新增", text: "留言可直接转发至开发者邮箱，并自动附带当前产品版本。" },
+      { type: "优化", text: "自动填入登录账号邮箱作为可选联系方式，减少重复输入。" },
+      { type: "优化", text: "增加发送中、发送成功和发送失败状态，以及防垃圾留言蜜罐字段。" },
+    ],
+  },
   {
     version: "Alpha 0.0.1",
     date: "2026-07-17",

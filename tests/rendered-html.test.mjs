@@ -50,9 +50,26 @@ test("keeps the visible changelog aligned with the project version", async () =>
   );
 
   assert.equal(CURRENT_VERSION, packageJson.version);
-  assert.equal(CURRENT_VERSION_LABEL, "Alpha 0.0.1");
+  assert.equal(CURRENT_VERSION_LABEL, "Alpha 0.0.2");
   assert.equal(CHANGELOG[0].version, CURRENT_VERSION_LABEL);
   assert.ok(CHANGELOG[0].changes.length > 0);
+});
+
+test("routes feedback to the owner email with useful context", async () => {
+  const feedbackPanel = await readFile(
+    new URL("../components/FeedbackPanel.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    feedbackPanel,
+    /formsubmit\.co\/ajax\/zerobrilliant@gmail\.com/,
+  );
+  assert.match(feedbackPanel, /产品版本/);
+  assert.match(feedbackPanel, /登录账号/);
+  assert.match(feedbackPanel, /_honey/);
+  assert.match(feedbackPanel, /response\.json\(\)/);
+  assert.match(feedbackPanel, /result\?\.success === false/);
 });
 
 test("uses one cloud autosave flow with clear sync states", async () => {
