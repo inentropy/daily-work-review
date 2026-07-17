@@ -789,8 +789,15 @@ useEffect(() => {
   });
 if (authLoading) {
   return (
-    <main style={{ padding: "40px" }}>
-      正在检查登录状态...
+    <main className="auth-check-shell">
+      <div className="auth-check-card" role="status" aria-live="polite">
+        <span className="brand-mark">✓</span>
+        <div>
+          <strong>日迹</strong>
+          <small>正在检查登录状态…</small>
+        </div>
+        <i aria-hidden="true" />
+      </div>
     </main>
   );
 }
@@ -817,7 +824,7 @@ if (authLoading) {
   return (
     <main>
       <header className="topbar">
-        <a className="brand" href="#"><span className="brand-mark">✓</span><span>日迹本</span></a>
+        <a className="brand" href="#"><span className="brand-mark">✓</span><span>日迹</span></a>
         <div className="top-actions">
           <button
               type="button"
