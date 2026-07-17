@@ -817,7 +817,7 @@ if (authLoading) {
   return (
     <main>
       <header className="topbar">
-        <a className="brand" href="#"><span className="brand-mark">✓</span><span>日迹</span></a>
+        <a className="brand" href="#"><span className="brand-mark">✓</span><span>日迹本</span></a>
         <div className="top-actions">
           <button
               type="button"
