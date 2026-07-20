@@ -9,14 +9,17 @@ import { supabase } from "@/lib/supabase";
 import {
   carryForwardPlans,
   createPlanTask,
+  createWorkItem,
   normalizePlanTasks,
+  normalizeWorkItems,
   PLAN_STATUSES,
   type PlanStatus,
   type PlanTask,
+  type WorkItem,
 } from "@/lib/task-plans";
 
 type Entry = {
-  wins: string[];
+  wins: WorkItem[];
   progress: string;
   blockers: string;
   learnings: string;
@@ -28,6 +31,15 @@ type Entry = {
 
 type SummaryType = "week" | "month" | "quarter" | "year";
 type SyncStatus = "syncing" | "synced" | "error";
+type ReminderSaveStatus = "idle" | "saving" | "saved" | "error";
+
+type ReminderPreferences = {
+  enabled: boolean;
+  email: string;
+  reminderCount: number;
+  reminderTimes: string[];
+  timezone: string;
+};
 
 type PeriodSummary = {
   achievements: string;
@@ -44,10 +56,19 @@ type PeriodInfo = {
 };
 
 const emptyEntry = (): Entry => ({
-  wins: [""], progress: "", blockers: "", learnings: "", tomorrow: [], carriedTaskIds: [], mood: 4, focus: 7,
+  wins: [createWorkItem()], progress: "", blockers: "", learnings: "", tomorrow: [], carriedTaskIds: [], mood: 4, focus: 7,
 });
 
 const emptyPeriodSummary = (): PeriodSummary => ({ achievements: "", growth: "", challenges: "", nextFocus: "" });
+const DEFAULT_REMINDER_TIMES = ["09:00", "14:00", "18:00"];
+
+const emptyReminderPreferences = (email = ""): ReminderPreferences => ({
+  enabled: false,
+  email,
+  reminderCount: 1,
+  reminderTimes: [DEFAULT_REMINDER_TIMES[0]],
+  timezone: "Asia/Shanghai",
+});
 
 const SUMMARY_TABS: { type: SummaryType; label: string; eyebrow: string }[] = [
   { type: "week", label: "周总结", eyebrow: "WEEKLY" },
@@ -107,7 +128,7 @@ let label: string;
 };
 
 const hasEntryContent = (entry: Entry) => Boolean(
-  entry.wins?.some(Boolean) || entry.progress?.trim() || entry.blockers?.trim() || entry.learnings?.trim() || entry.tomorrow?.some((task) => task.text.trim()),
+  entry.wins?.some((item) => item.text.trim()) || entry.progress?.trim() || entry.blockers?.trim() || entry.learnings?.trim() || entry.tomorrow?.some((task) => task.text.trim()),
 );
 
 const normalizeEntries = (
@@ -119,9 +140,10 @@ const normalizeEntries = (
       {
         ...emptyEntry(),
         ...value,
-        wins: Array.isArray(value?.wins)
-          ? value.wins
-          : [""],
+        wins: normalizeWorkItems(
+          value?.wins,
+          recordDate,
+        ),
         tomorrow: normalizePlanTasks(
           value?.tomorrow,
           recordDate,
@@ -210,11 +232,18 @@ export default function Home() {
   const [summaryType, setSummaryType] = useState<SummaryType>("week");
   const [summaryAnchor, setSummaryAnchor] = useState(keyOf(new Date()));
   const [periodSummaries, setPeriodSummaries] = useState<Record<string, PeriodSummary>>({});
+  const [reflectionOpen, setReflectionOpen] = useState(false);
+  const [reminderSettingsOpen, setReminderSettingsOpen] = useState(false);
+  const [reminderPreferences, setReminderPreferences] = useState<ReminderPreferences>(
+    emptyReminderPreferences(),
+  );
+  const [reminderSaveStatus, setReminderSaveStatus] = useState<ReminderSaveStatus>("idle");
   const lastSyncedSnapshot = useRef("");
   const syncAttempt = useRef(0);
   const allQuotes = useMemo(() => [...QUOTES, ...customQuotes], [customQuotes]);
   const entry = entries[date] || emptyEntry();
-  const yesterday = entries[moveDay(date, -1)];
+  const yesterdayKey = moveDay(date, -1);
+  const yesterday = entries[yesterdayKey];
   const tomorrowKey = moveDay(date, 1);
 // ① 检查 Supabase 登录状态
 useEffect(() => {
@@ -235,6 +264,69 @@ useEffect(() => {
   };
 }, []);
  /* eslint-disable react-hooks/set-state-in-effect */
+useEffect(() => {
+  if (!user) {
+    setReminderPreferences(emptyReminderPreferences());
+    setReminderSaveStatus("idle");
+    return;
+  }
+
+  let cancelled = false;
+
+  const loadReminderPreferences = async () => {
+    const { data, error } = await supabase
+      .from("reminder_preferences")
+      .select("enabled, email, reminder_count, reminder_times, timezone")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (cancelled) {
+      return;
+    }
+
+    if (error) {
+      if (error.code === "PGRST205" || error.code === "42P01") {
+        setReminderPreferences(emptyReminderPreferences(user.email ?? ""));
+        setReminderSaveStatus("idle");
+        return;
+      }
+
+      console.error("加载邮件提醒设置失败：", error);
+      setReminderPreferences(emptyReminderPreferences(user.email ?? ""));
+      setReminderSaveStatus("error");
+      return;
+    }
+
+    if (!data) {
+      setReminderPreferences(emptyReminderPreferences(user.email ?? ""));
+      setReminderSaveStatus("idle");
+      return;
+    }
+
+    const reminderCount = Math.min(3, Math.max(1, Number(data.reminder_count) || 1));
+    const reminderTimes = Array.isArray(data.reminder_times)
+      ? data.reminder_times.filter((time): time is string => typeof time === "string").slice(0, reminderCount)
+      : [];
+
+    setReminderPreferences({
+      enabled: Boolean(data.enabled),
+      email: typeof data.email === "string" ? data.email : (user.email ?? ""),
+      reminderCount,
+      reminderTimes: Array.from(
+        { length: reminderCount },
+        (_, index) => reminderTimes[index] ?? DEFAULT_REMINDER_TIMES[index],
+      ),
+      timezone: typeof data.timezone === "string" ? data.timezone : "Asia/Shanghai",
+    });
+    setReminderSaveStatus("saved");
+  };
+
+  void loadReminderPreferences();
+
+  return () => {
+    cancelled = true;
+  };
+}, [user]);
 useEffect(() => {
   if (!user) {
     setReady(false);
@@ -671,19 +763,68 @@ useEffect(() => {
     );
     setDate(nextDate);
   };
-  const updateWin = (index: number, value: string) => {
-    const next = [...entry.wins];
-    next[index] = value;
-    update({ wins: next });
-  };
-  const addWin = () =>
-    update({ wins: [...entry.wins, ""] });
-  const removeWin = (index: number) =>
+  const updateWorkItem = (
+    itemId: string,
+    patch: Partial<Pick<WorkItem, "text" | "status">>,
+  ) =>
     update({
-      wins: entry.wins.filter(
-        (_, itemIndex) => itemIndex !== index,
+      wins: entry.wins.map((item) =>
+        item.id === itemId ? { ...item, ...patch } : item,
       ),
     });
+  const addWorkItem = () =>
+    update({ wins: [...entry.wins, createWorkItem()] });
+  const removeWorkItem = (itemId: string) =>
+    update({
+      wins: entry.wins.filter(
+        (item) => item.id !== itemId,
+      ),
+    });
+  const updateYesterdayWorkItem = (
+    itemId: string,
+    status: PlanStatus,
+  ) => {
+    setEntries((previous) => {
+      const previousEntry = previous[yesterdayKey];
+
+      if (!previousEntry) {
+        return previous;
+      }
+
+      return {
+        ...previous,
+        [yesterdayKey]: {
+          ...previousEntry,
+          wins: previousEntry.wins.map((item) =>
+            item.id === itemId ? { ...item, status } : item,
+          ),
+        },
+      };
+    });
+  };
+  const carryYesterdayWork = () => {
+    const unfinished = (yesterday?.wins ?? []).filter(
+      (item) => item.text.trim() && item.status !== "completed",
+    );
+    const existingIds = new Set(entry.wins.map((item) => item.id));
+    const additions = unfinished
+      .filter((item) => !existingIds.has(item.id))
+      .map((item) => ({
+        ...item,
+        status: "todo" as PlanStatus,
+        carriedFrom: yesterdayKey,
+      }));
+
+    if (!additions.length) {
+      setToast("昨天没有可加入的未完成工作");
+      setTimeout(() => setToast(""), 1800);
+      return;
+    }
+
+    update({ wins: [...additions, ...entry.wins] });
+    setToast(`已将 ${additions.length} 项加入今天`);
+    setTimeout(() => setToast(""), 1800);
+  };
   const addPlan = () =>
     update({
       tomorrow: [
@@ -710,7 +851,62 @@ useEffect(() => {
         (task) => task.id !== taskId,
       ),
     });
-  const doneCount = entry.wins.filter(Boolean).length;
+  const setReminderCount = (count: number) => {
+    const nextCount = Math.min(3, Math.max(1, count));
+    setReminderPreferences((previous) => ({
+      ...previous,
+      reminderCount: nextCount,
+      reminderTimes: Array.from(
+        { length: nextCount },
+        (_, index) => previous.reminderTimes[index] ?? DEFAULT_REMINDER_TIMES[index],
+      ),
+    }));
+    setReminderSaveStatus("idle");
+  };
+  const updateReminderTime = (index: number, value: string) => {
+    setReminderPreferences((previous) => ({
+      ...previous,
+      reminderTimes: previous.reminderTimes.map((time, timeIndex) =>
+        timeIndex === index ? value : time,
+      ),
+    }));
+    setReminderSaveStatus("idle");
+  };
+  const saveReminderPreferences = async () => {
+    if (!user || !reminderPreferences.email.trim()) {
+      setReminderSaveStatus("error");
+      return;
+    }
+
+    setReminderSaveStatus("saving");
+    const { error } = await supabase
+      .from("reminder_preferences")
+      .upsert(
+        {
+          user_id: user.id,
+          enabled: reminderPreferences.enabled,
+          email: reminderPreferences.email.trim(),
+          reminder_count: reminderPreferences.reminderCount,
+          reminder_times: reminderPreferences.reminderTimes,
+          timezone: reminderPreferences.timezone,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" },
+      );
+
+    if (error) {
+      console.error("保存邮件提醒设置失败：", error);
+      setReminderSaveStatus("error");
+      return;
+    }
+
+    setReminderSaveStatus("saved");
+    setToast(reminderPreferences.enabled ? "邮件提醒已开启" : "邮件提醒已关闭");
+    setTimeout(() => setToast(""), 1800);
+  };
+  const doneCount = entry.wins.filter(
+    (item) => item.text.trim() && item.status === "completed",
+  ).length;
   const plannedCount = entry.tomorrow.filter(
     (task) => task.text.trim(),
   ).length;
@@ -728,7 +924,9 @@ useEffect(() => {
     .filter(([key, value]) => key >= period.startKey && key <= period.endKey && hasEntryContent(value))
     .sort(([a], [b]) => b.localeCompare(a)), [entries, period]);
   const periodWins = useMemo(() => periodRecords.flatMap(([recordDate, value]) =>
-    value.wins.filter(Boolean).map(text => ({ date: recordDate, text }))), [periodRecords]);
+    value.wins
+      .filter((item) => item.text.trim() && item.status === "completed")
+      .map((item) => ({ date: recordDate, text: item.text }))), [periodRecords]);
   const periodProgress = useMemo(() => periodRecords
     .filter(([, value]) => value.progress.trim())
     .map(([recordDate, value]) => ({ date: recordDate, text: value.progress.trim() })), [periodRecords]);
@@ -767,7 +965,7 @@ useEffect(() => {
   }, [date]);
 
   const copyReport = async () => {
-    const text = `【${date} 工作日报】\n\n今日完成：\n${entry.wins.filter(Boolean).map((x, i) => `${i + 1}. ${x}`).join("\n") || "暂无"}\n\n进展与产出：\n${entry.progress || "暂无"}\n\n问题与思考：\n${entry.blockers || "暂无"}\n\n今日收获：\n${entry.learnings || "暂无"}\n\n明日计划：\n${entry.tomorrow.filter((task) => task.text.trim()).map((task, i) => `${i + 1}. [${PLAN_STATUSES.find((status) => status.value === task.status)?.label}] ${task.text}`).join("\n") || "暂无"}`;
+    const text = `【${date} 工作日报】\n\n今日工作内容：\n${entry.wins.filter((item) => item.text.trim()).map((item, i) => `${i + 1}. [${PLAN_STATUSES.find((status) => status.value === item.status)?.label}] ${item.text}`).join("\n") || "暂无"}\n\n进展与产出：\n${entry.progress || "暂无"}\n\n问题与思考：\n${entry.blockers || "暂无"}\n\n今日收获：\n${entry.learnings || "暂无"}\n\n明日计划：\n${entry.tomorrow.filter((task) => task.text.trim()).map((task, i) => `${i + 1}. [${PLAN_STATUSES.find((status) => status.value === task.status)?.label}] ${task.text}`).join("\n") || "暂无"}`;
     await writeClipboard(text); setToast("日报已复制"); setTimeout(() => setToast(""), 1800);
   };
 
@@ -779,7 +977,11 @@ useEffect(() => {
   };
 
   const seed = () => update({
-    wins: ["完成重点客户报价方案", "跟进东南亚项目技术参数", "整理本周询盘数据"],
+    wins: [
+      { ...createWorkItem(), text: "完成重点客户报价方案", status: "completed" },
+      { ...createWorkItem(), text: "跟进东南亚项目技术参数", status: "in_progress" },
+      { ...createWorkItem(), text: "整理本周询盘数据", status: "todo" },
+    ],
     progress: "报价方案已完成初稿，关键产品参数已与技术部门确认。客户反馈积极，等待最终数量确认。",
     blockers: "部分海外认证资料仍需补齐；下一步提前建立资料清单，减少临时查找。",
     learnings: "重要任务尽量安排在上午，沟通类工作集中处理更高效。",
@@ -871,7 +1073,7 @@ if (authLoading) {
       </section>
 
       <section className="stats">
-        <div><span>今日完成</span><strong>{doneCount}</strong><small>件重要事项</small></div>
+        <div><span>今日已完成</span><strong>{doneCount}</strong><small>共 {entry.wins.filter((item) => item.text.trim()).length} 项工作</small></div>
         <div><span>专注状态</span><strong>{entry.focus}<b>/10</b></strong><small>{entry.focus >= 8 ? "状态很棒" : entry.focus >= 6 ? "稳步推进" : "注意休息"}</small></div>
         <div><span>明日待办</span><strong>{plannedCount}</strong><small>{completedPlanCount} 项已完成</small></div>
         <div className="quote"><span>今日一句</span><p>“{allQuotes[quoteIndex] || QUOTES[0]}”</p><div className="quote-actions"><button onClick={() => setQuoteEditorOpen(true)} aria-label="添加语录" title="添加语录">＋</button><button onClick={nextQuote} aria-label="换一句" title="换一句">↻</button></div></div>
@@ -882,17 +1084,33 @@ if (authLoading) {
           <div className="panel-head"><div className="number">01</div><div><p>LOOK BACK</p><h2>复盘昨天</h2></div><span className="tag">昨日回望</span></div>
           <div className="yesterday-card">
             <div className="yesterday-block-title">
-              <span>昨天完成的工作</span>
-              <b>{yesterday?.wins?.filter(Boolean).length || 0} 项</b>
+              <span>昨天的工作状态</span>
+              <b>{yesterday?.wins?.filter((item) => item.text.trim() && item.status === "completed").length || 0} / {yesterday?.wins?.filter((item) => item.text.trim()).length || 0} 完成</b>
             </div>
-            {yesterday?.wins?.filter(Boolean).length ? (
+            {yesterday?.wins?.some((item) => item.text.trim()) ? (
               <div className="past-list">
-                {yesterday.wins.filter(Boolean).map((x, i) => <div className="past-item" key={i}><span>✓</span><p>{x}</p></div>)}
+                {yesterday.wins.filter((item) => item.text.trim()).map((item) => (
+                  <div className={`past-item status-${item.status}`} key={item.id}>
+                    <span>{item.status === "completed" ? "✓" : "○"}</span>
+                    <p>{item.text}</p>
+                    <select
+                      value={item.status}
+                      onChange={(event) => updateYesterdayWorkItem(item.id, event.target.value as PlanStatus)}
+                      aria-label={`${item.text}的状态`}
+                    >
+                      {PLAN_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
+                    </select>
+                  </div>
+                ))}
               </div>
-            ) : <p className="empty-past">昨天还没有记录已完成的工作。</p>}
+            ) : <p className="empty-past">昨天还没有工作记录，可以返回昨天补充后再来复盘。</p>}
             <div className="yesterday-summary">
               <span>昨天的进展摘要</span>
               <p>{yesterday?.progress || "暂无进展摘要。"}</p>
+            </div>
+            <div className="yesterday-actions">
+              <button type="button" onClick={() => selectDate(yesterdayKey)}>编辑昨天记录</button>
+              <button type="button" className="primary" onClick={carryYesterdayWork}>未完成加入今天</button>
             </div>
           </div>
           <label className="field-label">昨天最值得复用的经验</label>
@@ -903,9 +1121,30 @@ if (authLoading) {
 
         <article className="panel today">
           <div className="panel-head"><div className="number">02</div><div><p>CAPTURE TODAY</p><h2>总结今天</h2></div><span className="tag active">正在记录</span></div>
-          <label className="field-label">今日完成</label>
-          <div className="task-list">{entry.wins.map((item, i) => <div className="task" key={i}><span className={item ? "checked" : ""}>{item ? "✓" : i + 1}</span><input value={item} onChange={e => updateWin(i, e.target.value)} placeholder="我今天完成了什么？"/><button onClick={() => removeWin(i)}>×</button></div>)}</div>
-          <button className="add-btn" onClick={addWin}>＋ 添加一项完成</button>
+          <label className="field-label">今日工作内容</label>
+          <div className="task-list">
+            {entry.wins.map((item, i) => (
+              <div className={`work-item status-${item.status}`} key={item.id}>
+                <span>{item.status === "completed" ? "✓" : pad(i + 1)}</span>
+                <textarea
+                  rows={1}
+                  value={item.text}
+                  onChange={(event) => updateWorkItem(item.id, { text: event.target.value })}
+                  placeholder="记录今天推进、完成或暂未完成的工作……"
+                />
+                <select
+                  value={item.status}
+                  onChange={(event) => updateWorkItem(item.id, { status: event.target.value as PlanStatus })}
+                  aria-label={`${item.text || `第 ${i + 1} 项工作`}的状态`}
+                >
+                  {PLAN_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
+                </select>
+                <button onClick={() => removeWorkItem(item.id)} aria-label="删除工作内容">×</button>
+                {item.carriedFrom && <small>由 {item.carriedFrom} 加入今天</small>}
+              </div>
+            ))}
+          </div>
+          <button className="add-btn" onClick={addWorkItem}>＋ 添加一项工作内容</button>
           <label className="field-label">进展与产出</label>
           <textarea className="large" value={entry.progress} onChange={e => update({ progress: e.target.value })} placeholder="记录关键进展、数据、成果，或值得分享的细节……" />
           <div className="sliders">
@@ -947,8 +1186,77 @@ if (authLoading) {
             <div className="plan-empty"><span>○</span><p>明天还没有待办事项<br/><small>添加任务后，可以随时更新推进状态。</small></p></div>
           )}
           <button className="add-btn dark" onClick={addPlan}>＋ 添加一项待办</button>
-          <div className="focus-note"><span>✦</span><div><strong>给明天的提醒</strong><p>优先完成第一件事，再打开消息列表。给重要的事留出不被打扰的时间。</p></div></div>
-          {!entry.progress && !entry.wins.some(Boolean) && <button className="example" onClick={seed}>填入示例，快速体验</button>}
+          <div className={`reminder-card ${reminderPreferences.enabled ? "enabled" : ""}`}>
+            <div className="reminder-summary">
+              <span>✦</span>
+              <div>
+                <strong>明日邮件提醒</strong>
+                <p>{reminderPreferences.enabled ? `已开启 · 每天 ${reminderPreferences.reminderCount} 次` : "关闭网页后也能收到未完成事项提醒"}</p>
+              </div>
+              <button type="button" onClick={() => setReminderSettingsOpen((open) => !open)} aria-expanded={reminderSettingsOpen}>
+                {reminderSettingsOpen ? "收起" : "设置"}
+              </button>
+            </div>
+            {reminderSettingsOpen && (
+              <div className="reminder-settings">
+                <label className="reminder-switch">
+                  <input
+                    type="checkbox"
+                    checked={reminderPreferences.enabled}
+                    onChange={(event) => {
+                      setReminderPreferences((previous) => ({ ...previous, enabled: event.target.checked }));
+                      setReminderSaveStatus("idle");
+                    }}
+                  />
+                  <span>启用邮件提醒</span>
+                </label>
+                <label>
+                  <span>接收邮箱</span>
+                  <input
+                    type="email"
+                    value={reminderPreferences.email}
+                    onChange={(event) => {
+                      setReminderPreferences((previous) => ({ ...previous, email: event.target.value }));
+                      setReminderSaveStatus("idle");
+                    }}
+                    placeholder="name@example.com"
+                  />
+                </label>
+                <label>
+                  <span>每天提醒次数</span>
+                  <select value={reminderPreferences.reminderCount} onChange={(event) => setReminderCount(Number(event.target.value))}>
+                    {[1, 2, 3].map((count) => <option key={count} value={count}>{count} 次</option>)}
+                  </select>
+                </label>
+                <div className="reminder-times">
+                  <span>提醒时间（北京时间）</span>
+                  <div>
+                    {reminderPreferences.reminderTimes.map((time, index) => (
+                      <input
+                        key={index}
+                        type="time"
+                        value={time}
+                        onChange={(event) => updateReminderTime(index, event.target.value)}
+                        aria-label={`第 ${index + 1} 次提醒时间`}
+                      />
+                    ))}
+                  </div>
+                </div>
+                <div className="reminder-save">
+                  <small className={reminderSaveStatus === "error" ? "error" : ""}>
+                    {reminderSaveStatus === "saving" && "正在保存…"}
+                    {reminderSaveStatus === "saved" && "设置已保存"}
+                    {reminderSaveStatus === "error" && "保存失败，请稍后重试"}
+                    {reminderSaveStatus === "idle" && "只提醒仍未完成的明日事项"}
+                  </small>
+                  <button type="button" onClick={() => void saveReminderPreferences()} disabled={reminderSaveStatus === "saving"}>
+                    保存提醒设置
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+          {!entry.progress && !entry.wins.some((item) => item.text.trim()) && <button className="example" onClick={seed}>填入示例，快速体验</button>}
         </article>
       </section>
 
@@ -985,13 +1293,18 @@ if (authLoading) {
           </article>
         </div>
 
-        <div className="reflection-head"><div><p>PERSONAL REVIEW</p><h3>写下这一阶段真正值得留下的东西</h3></div><span>以下内容按周期自动保存</span></div>
-        <div className="reflection-grid">
-          <label><span><b>01</b>关键成果</span><small>最有价值的结果、数据或突破</small><textarea value={currentPeriodSummary.achievements} onChange={event => updatePeriodSummary("achievements", event.target.value)} placeholder="这一阶段最值得肯定的成果是……" /></label>
-          <label><span><b>02</b>经验与成长</span><small>有效方法、能力提升和新认知</small><textarea value={currentPeriodSummary.growth} onChange={event => updatePeriodSummary("growth", event.target.value)} placeholder="哪些方法值得继续复用……" /></label>
-          <label><span><b>03</b>问题与改进</span><small>阻碍、偏差和下次的调整方式</small><textarea value={currentPeriodSummary.challenges} onChange={event => updatePeriodSummary("challenges", event.target.value)} placeholder="哪里可以做得更好……" /></label>
-          <label><span><b>04</b>下一阶段重点</span><small>最重要的目标和行动方向</small><textarea value={currentPeriodSummary.nextFocus} onChange={event => updatePeriodSummary("nextFocus", event.target.value)} placeholder="下一阶段优先推进……" /></label>
-        </div>
+        <button className="reflection-toggle" type="button" onClick={() => setReflectionOpen((open) => !open)} aria-expanded={reflectionOpen} aria-controls="reflectionFields">
+          <div><p>PERSONAL REVIEW</p><h3>写下这一阶段真正值得留下的东西</h3><span>以下内容按周期自动保存</span></div>
+          <b>{reflectionOpen ? "收起 ↑" : "展开填写 ↓"}</b>
+        </button>
+        {reflectionOpen && (
+          <div className="reflection-grid" id="reflectionFields">
+            <label><span><b>01</b>关键成果</span><small>最有价值的结果、数据或突破</small><textarea value={currentPeriodSummary.achievements} onChange={event => updatePeriodSummary("achievements", event.target.value)} placeholder="这一阶段最值得肯定的成果是……" /></label>
+            <label><span><b>02</b>经验与成长</span><small>有效方法、能力提升和新认知</small><textarea value={currentPeriodSummary.growth} onChange={event => updatePeriodSummary("growth", event.target.value)} placeholder="哪些方法值得继续复用……" /></label>
+            <label><span><b>03</b>问题与改进</span><small>阻碍、偏差和下次的调整方式</small><textarea value={currentPeriodSummary.challenges} onChange={event => updatePeriodSummary("challenges", event.target.value)} placeholder="哪里可以做得更好……" /></label>
+            <label><span><b>04</b>下一阶段重点</span><small>最重要的目标和行动方向</small><textarea value={currentPeriodSummary.nextFocus} onChange={event => updatePeriodSummary("nextFocus", event.target.value)} placeholder="下一阶段优先推进……" /></label>
+          </div>
+        )}
         <div className="period-actions"><span><i /> 已自动保存到当前浏览器</span><button onClick={copyPeriodSummary}>复制本期总结</button></div>
       </section>
       <footer>

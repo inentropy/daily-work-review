@@ -37,6 +37,7 @@
     "drizzle/**/*",
     "worker/**/*",
     "build/**/*",
+    "supabase/**/*",
     "drizzle.config.ts"
   ]
 }

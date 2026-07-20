@@ -13,10 +13,24 @@ export type ChangelogRelease = {
   changes: ChangelogItem[];
 };
 
-export const CURRENT_VERSION = "0.0.3-alpha.0";
-export const CURRENT_VERSION_LABEL = "Alpha 0.0.3";
+export const CURRENT_VERSION = "0.0.4-alpha.0";
+export const CURRENT_VERSION_LABEL = "Alpha 0.0.4";
 
 export const CHANGELOG: ChangelogRelease[] = [
+  {
+    version: "Alpha 0.0.4",
+    date: "2026-07-20",
+    title: "更有回应的每日工作台",
+    summary: "让工作内容、昨日复盘、明日提醒和周期总结形成更清晰、更有反馈感的使用闭环。",
+    changes: [
+      { type: "新增", text: "今日工作内容支持待开始、进行中、已完成和延期四种状态。" },
+      { type: "新增", text: "昨日复盘可以直接更新状态、返回编辑，并将未完成工作加入今天。" },
+      { type: "新增", text: "明日计划增加可配置的邮件提醒设置与安全的服务端提醒链路。" },
+      { type: "优化", text: "长工作内容支持多行自动展开，避免文字被截断。" },
+      { type: "优化", text: "周期复盘填写区支持展开和收起，减少主页空间占用。" },
+      { type: "优化", text: "提高重点文字字号，并加强圆角、悬停、点击和焦点反馈。" },
+    ],
+  },
   {
     version: "Alpha 0.0.3",
     date: "2026-07-17",

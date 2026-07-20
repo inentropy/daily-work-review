@@ -11,6 +11,8 @@ export type PlanTask = {
   carriedFrom?: string;
 };
 
+export type WorkItem = PlanTask;
+
 export const PLAN_STATUSES: {
   value: PlanStatus;
   label: string;
@@ -32,6 +34,55 @@ export const createPlanTask = (): PlanTask => ({
   text: "",
   status: "todo",
 });
+
+export const createWorkItem = (): WorkItem => ({
+  ...createPlanTask(),
+});
+
+export const normalizeWorkItems = (
+  value: unknown,
+  recordDate: string,
+): WorkItem[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((item, index) => {
+    if (typeof item === "string") {
+      return {
+        id: `${recordDate}-legacy-work-${index}`,
+        text: item,
+        status: "completed",
+      };
+    }
+
+    if (item && typeof item === "object") {
+      const candidate = item as Partial<WorkItem>;
+      return {
+        id:
+          typeof candidate.id === "string" && candidate.id
+            ? candidate.id
+            : `${recordDate}-work-${index}`,
+        text:
+          typeof candidate.text === "string"
+            ? candidate.text
+            : "",
+        status: statusValues.has(candidate.status as PlanStatus)
+          ? (candidate.status as PlanStatus)
+          : "todo",
+        ...(typeof candidate.carriedFrom === "string"
+          ? { carriedFrom: candidate.carriedFrom }
+          : {}),
+      };
+    }
+
+    return {
+      id: `${recordDate}-work-${index}`,
+      text: "",
+      status: "todo",
+    };
+  });
+};
 
 export const normalizePlanTasks = (
   value: unknown,

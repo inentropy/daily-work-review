@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   carryForwardPlans,
   normalizePlanTasks,
+  normalizeWorkItems,
 } from "../lib/task-plans.ts";
 import {
   CHANGELOG,
@@ -25,7 +26,11 @@ test("exports the daily review website", async () => {
   assert.match(html, /正在检查登录状态/);
   assert.match(page, /复盘昨天/);
   assert.match(page, /总结今天/);
+  assert.match(page, /今日工作内容/);
+  assert.match(page, /未完成加入今天/);
   assert.match(page, /预设明天/);
+  assert.match(page, /明日邮件提醒/);
+  assert.match(page, /写下这一阶段真正值得留下的东西/);
   assert.match(page, /周期总结/);
   assert.match(page, /周总结/);
   assert.match(page, /月总结/);
@@ -50,7 +55,7 @@ test("keeps the visible changelog aligned with the project version", async () =>
   );
 
   assert.equal(CURRENT_VERSION, packageJson.version);
-  assert.equal(CURRENT_VERSION_LABEL, "Alpha 0.0.3");
+  assert.equal(CURRENT_VERSION_LABEL, "Alpha 0.0.4");
   assert.equal(CHANGELOG[0].version, CURRENT_VERSION_LABEL);
   assert.ok(CHANGELOG[0].changes.length > 0);
 });
@@ -98,13 +103,50 @@ test("uses one cloud autosave flow with clear sync states", async () => {
     new URL("../app/page.tsx", import.meta.url),
     "utf8",
   );
-  const upserts = page.match(/\.upsert\(/g) ?? [];
+  const stateUpserts = page.match(
+    /\.from\("daymark_state"\)[\s\S]{0,500}?\.upsert\(/g,
+  ) ?? [];
 
   // One upsert handles first-login migration; the other is the only autosave flow.
-  assert.equal(upserts.length, 2);
+  assert.equal(stateUpserts.length, 2);
   assert.match(page, /正在同步云端/);
   assert.match(page, /云端已同步/);
   assert.match(page, /云端同步失败/);
+});
+
+test("upgrades legacy completed-work strings to status-aware work items", () => {
+  const workItems = normalizeWorkItems(
+    ["完成客户报价", { id: "work-2", text: "等待客户回复", status: "in_progress" }],
+    "2026-07-19",
+  );
+
+  assert.equal(workItems[0].status, "completed");
+  assert.equal(workItems[0].text, "完成客户报价");
+  assert.equal(workItems[1].status, "in_progress");
+});
+
+test("ships the secure email reminder backend", async () => {
+  const migrationFiles = [
+    new URL(
+      "../supabase/migrations/20260720080208_email_reminders.sql",
+      import.meta.url,
+    ),
+  ];
+  const migration = await readFile(migrationFiles[0], "utf8");
+  const edgeFunction = await readFile(
+    new URL(
+      "../supabase/functions/send-work-reminders/index.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(migration, /enable row level security/i);
+  assert.match(migration, /auth\.uid\(\)/);
+  assert.match(migration, /unique \(user_id, reminder_date, reminder_time\)/);
+  assert.match(edgeFunction, /auth: "secret"/);
+  assert.match(edgeFunction, /RESEND_API_KEY/);
+  assert.match(edgeFunction, /https:\/\/www\.daily-work-review\.com/);
 });
 
 test("upgrades legacy plans and carries unfinished tasks once", () => {

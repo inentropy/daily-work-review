@@ -1,21 +1,23 @@
 # 日迹 · 工作复盘与周期总结
 
-> 当前版本：**Alpha 0.0.3**
+> 当前版本：**Alpha 0.0.4**
 
 日迹是一个面向中文用户的个人工作复盘工具。它把“复盘昨天、总结今天、预设明天”放在同一个工作台中，并根据每日记录自动汇总周、月、季度和年度总结。
 
-- 线上地址：[https://daily-work-review.vercel.app/](https://daily-work-review.vercel.app/)
-- 留言反馈：[https://daily-work-review.vercel.app/feedback/](https://daily-work-review.vercel.app/feedback/)
+- 正式地址：[https://www.daily-work-review.com/](https://www.daily-work-review.com/)
+- 留言反馈：[https://www.daily-work-review.com/feedback/](https://www.daily-work-review.com/feedback/)
 - 更新记录：[CHANGELOG.md](./CHANGELOG.md)
 
 ## 主要功能
 
 ### 每日工作台
 
-- 按日期记录完成事项、工作进展、问题阻碍、经验收获、心情和专注度。
-- 自动展示前一天的完成内容与工作进展，方便连续复盘。
+- 按日期记录工作内容、推进状态、工作进展、问题阻碍、经验收获、心情和专注度。
+- 今日工作支持“待开始、进行中、已完成、延期”四种状态，多行内容会随输入自动扩展。
+- 昨日复盘可以直接调整工作状态、返回编辑昨天，或把未完成工作加入今天。
 - 明日计划支持“待开始、进行中、已完成、延期”四种状态。
 - 未完成的任务会自动顺延到下一天，并避免重复带入。
+- 用户可以自行开启邮件提醒，并设置每天 1—3 次提醒及具体时间。
 - 日报内容可以一键复制，便于发送日报或保存到其他工具。
 
 ### 周期总结
@@ -24,7 +26,7 @@
 - 可以切换上一周期、下一周期，并快速返回当前周期。
 - 自动统计有记录的工作天数、完成事项、平均专注度和计划数量。
 - 自动整理周期内的完成事项与每日进展。
-- 每个周期可分别填写关键成果、经验与成长、问题与改进、下一阶段重点。
+- 每个周期可分别填写关键成果、经验与成长、问题与改进、下一阶段重点；填写区可以展开或收起。
 - 周期总结可一键复制，不同周期的人工复盘互不覆盖。
 
 ### 账号与数据同步
@@ -51,6 +53,8 @@
 - `daymark-period-summaries:<user-id>`：周期复盘内容。
 - `daymark-custom-quotes:<user-id>`：自定义语录。
 - Supabase 表 `daymark_state`：按 `user_id` 保存以上三类云端数据。
+- Supabase 表 `reminder_preferences`：按用户保存邮件提醒开关、邮箱、次数和时间。
+- Supabase 表 `reminder_delivery_log`：仅供服务端去重和记录邮件投递结果。
 
 旧版未绑定账号的数据键仍会被识别，并在首次登录时迁移：
 
@@ -65,6 +69,8 @@
 - [Next.js 16](https://nextjs.org/) App Router
 - React 19 + TypeScript
 - Supabase Auth 与 Postgres 数据存储
+- Supabase Cron + Edge Functions 定时触发提醒
+- Resend 发送提醒邮件
 - 原生 CSS 响应式界面
 - Node.js Test Runner
 - Vercel 自动构建与部署
@@ -100,6 +106,26 @@ npm run dev
 
 打开 [http://localhost:3000](http://localhost:3000)。
 
+### 邮件提醒后端
+
+邮件提醒依赖 `supabase/` 中的迁移和 Edge Function。首次配置时：
+
+```bash
+npx supabase link --project-ref 你的项目标识
+npx supabase db push
+npx supabase secrets set RESEND_API_KEY=你的_Resend_API_Key
+npx supabase secrets set "REMINDER_FROM=日迹 <reminder@daily-work-review.com>"
+npx supabase functions deploy send-work-reminders --use-api
+```
+
+还需要在 Resend 验证 `daily-work-review.com` 发信域名，并在 Supabase Cron 中创建一个每 5 分钟执行的 Edge Function 任务：
+
+```cron
+*/5 * * * *
+```
+
+Cron 调用 `send-work-reminders` 时把 Supabase secret key 放在 `apikey` 请求头中进行服务端鉴权。secret key 应存入 Supabase Vault 并在调用时读取，不要明文写入 SQL；也不要把 secret key 或 `RESEND_API_KEY` 放入 `NEXT_PUBLIC_` 环境变量或提交到仓库。
+
 ### 检查与构建
 
 ```bash
@@ -131,6 +157,9 @@ lib/
 ├─ changelog.ts             # 当前版本与更新内容
 ├─ supabase.ts              # Supabase 客户端
 └─ task-plans.ts            # 任务状态与自动顺延逻辑
+supabase/
+├─ migrations/              # 邮件提醒表、RLS 与投递日志
+└─ functions/               # 定时扫描并发送提醒邮件
 tests/
 └─ rendered-html.test.mjs   # 静态输出与核心功能测试
 ```
@@ -139,7 +168,9 @@ tests/
 
 生产站点已经从 Netlify 迁移到 Vercel，当前唯一正式地址为：
 
-[https://daily-work-review.vercel.app/](https://daily-work-review.vercel.app/)
+[https://www.daily-work-review.com/](https://www.daily-work-review.com/)
+
+Vercel 默认域名 `https://daily-work-review.vercel.app/` 仅作为部署域名保留。
 
 项目连接 GitHub，经过审核的代码推送到 `main` 后由 Vercel 自动构建和发布。日常修改遵循 [AGENTS.md](./AGENTS.md) 中的流程：
 
