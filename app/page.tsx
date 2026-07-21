@@ -1126,12 +1126,15 @@ if (authLoading) {
             {entry.wins.map((item, i) => (
               <div className={`work-item status-${item.status}`} key={item.id}>
                 <span>{item.status === "completed" ? "✓" : pad(i + 1)}</span>
-                <textarea
-                  rows={1}
-                  value={item.text}
-                  onChange={(event) => updateWorkItem(item.id, { text: event.target.value })}
-                  placeholder="记录今天推进、完成或暂未完成的工作……"
-                />
+                <div className="expandable-textarea">
+                  <textarea
+                    rows={1}
+                    value={item.text}
+                    onChange={(event) => updateWorkItem(item.id, { text: event.target.value })}
+                    placeholder="记录今天推进、完成或暂未完成的工作……"
+                    aria-label={`第 ${i + 1} 项今日工作内容`}
+                  />
+                </div>
                 <select
                   value={item.status}
                   onChange={(event) => updateWorkItem(item.id, { status: event.target.value as PlanStatus })}
@@ -1163,11 +1166,15 @@ if (authLoading) {
                 <div className={`plan status-${task.status}`} key={task.id}>
                   <span>{task.status === "completed" ? "✓" : pad(i + 1)}</span>
                   <div className="plan-main">
-                    <input
-                      value={task.text}
-                      onChange={(event) => updatePlan(task.id, { text: event.target.value })}
-                      placeholder={i === 0 ? "明天最重要的事情是……" : "接下来要推进……"}
-                    />
+                    <div className="expandable-textarea">
+                      <textarea
+                        rows={1}
+                        value={task.text}
+                        onChange={(event) => updatePlan(task.id, { text: event.target.value })}
+                        placeholder={i === 0 ? "明天最重要的事情是……" : "接下来要推进……"}
+                        aria-label={`第 ${i + 1} 项待办内容`}
+                      />
+                    </div>
                     {task.carriedFrom && <small>由 {task.carriedFrom} 自动顺延</small>}
                   </div>
                   <select

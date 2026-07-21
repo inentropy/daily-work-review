@@ -49,6 +49,17 @@ test("keeps the existing browser storage keys", async () => {
   assert.match(page, /daymark-custom-quotes/);
 });
 
+test("uses expandable multiline fields for work and planning items", async () => {
+  const page = await readFile(
+    new URL("../app/page.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.equal(page.match(/className="expandable-textarea"/g)?.length, 2);
+  assert.doesNotMatch(page, /<input\s+\r?\n\s+value=\{task\.text\}/);
+  assert.match(page, /aria-label=\{`第 \$\{i \+ 1\} 项待办内容`\}/);
+});
+
 test("keeps the visible changelog aligned with the project version", async () => {
   const packageJson = JSON.parse(
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
